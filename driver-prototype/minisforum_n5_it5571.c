@@ -493,6 +493,11 @@ static struct n5_board_profile n5_pro_f8naa = {
 	.validated = false,
 };
 
+static struct n5_board_profile n5_pro_f8nab = {
+	.name = "Minisforum N5 Pro / F8NAB",
+	.validated = false,
+};
+
 static struct n5_board_profile n5_air_f8nab = {
 	.name = "Minisforum N5 Air / F8NAB",
 	.validated = false,
@@ -514,6 +519,14 @@ static const struct dmi_system_id n5_dmi_table[] = {
 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "F8NAA"),
 		},
 		.driver_data = &n5_pro_f8naa,
+	},
+	{
+		.ident = "Minisforum N5 Pro / F8NAB (experimental)",
+		.matches = {
+			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "N5 PRO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "F8NAB"),
+		},
+		.driver_data = &n5_pro_f8nab,
 	},
 	{
 		.ident = "Minisforum N5 Air / F8NAB (experimental)",
@@ -548,7 +561,7 @@ static int n5_probe(struct platform_device *pdev)
 		profile = match->driver_data;
 	if (!profile && !force)
 		return dev_err_probe(&pdev->dev, -ENODEV,
-				     "unsupported system; expected N5/F8NAA, N5 PRO/F8NAA or N5A/F8NAB\n");
+				     "unsupported system; expected N5/F8NAA, N5 PRO/F8NAA, N5 PRO/F8NAB or N5A/F8NAB\n");
 
 	if (!request_region(N5_EC_DATA, 1, N5_DRIVER_NAME))
 		return dev_err_probe(&pdev->dev, -EBUSY,
