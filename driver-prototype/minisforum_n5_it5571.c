@@ -691,4 +691,4 @@ module_exit(n5_exit);
 MODULE_AUTHOR("ltdstudio, community exploration for the Minisforum N5 family");
 MODULE_DESCRIPTION("Minisforum N5 family IT5571 fan/temp hwmon driver; N5 Pro/Air support is experimental; not affiliated with Minisforum; use at your own risk");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.2.0");
+MODULE_VERSION("0.3.0");

@@ -1,12 +1,27 @@
 #!/bin/bash
 # Minisforum N5 IT5571 — DKMS Removal Script
-# Run as root: sudo ./remove-dkms.sh
+#
+# Run as root: sudo ./remove-dkms.sh [VERSION]
+#
+#   VERSION   DKMS package version to remove (default: 0.3.0).
+#             install.sh passes the release version so the correct DKMS
+#             package is targeted.
+#
 # Completely removes driver from DKMS and system.
 
 set -euo pipefail
 
 DRIVER_NAME="minisforum-n5-it5571"
-DRIVER_VERSION="0.2.0"
+DRIVER_VERSION="${DRIVER_VERSION:-0.3.0}"
+
+# Accept VERSION as first positional argument (override env/default)
+for arg in "$@"; do
+    case "$arg" in
+        -*) echo "unknown option: $arg" >&2; exit 1 ;;
+        *)  DRIVER_VERSION="$arg" ;;
+    esac
+done
+
 DKMS_DIR="/usr/src/${DRIVER_NAME}-${DRIVER_VERSION}"
 
 if [[ $EUID -ne 0 ]]; then
