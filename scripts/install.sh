@@ -18,7 +18,8 @@
 #   (no flag)  --test         build + insmod into the running kernel (read-only,
 #                             no PWM writes). Nothing is persisted. Reboot.
 #   --persistent              install into /lib/modules/<kver>/extra + modprobe
-#                             config. Survives reboots; rebuild after kernel updates.
+#                             config. Survives reboots; should be rebuilt after
+#                             kernel updates.
 #   --dkms                    full DKMS install, auto-rebuilt on kernel updates.
 #   --uninstall               detect what is installed (insmod/modprobe/DKMS)
 #                             and undo it, including config and /usr/src.
@@ -83,9 +84,8 @@ Usage:
 
   --dkms
         Full DKMS install. The module is rebuilt automatically on every
-        kernel update. Checks that `dkms`, `build-essential` and
-        `linux-headers-$(uname -r)` are present and prints the apt command
-        for anything missing.
+        kernel update. Missing build dependencies and dkms itself are
+        installed automatically for your distro.
 
   --uninstall
         Detects how the module is installed (insmod / persistent / DKMS)
@@ -104,33 +104,22 @@ Usage:
 Notes:
   - Must run as root (via sudo).
   - The compiled .ko only works on the exact kernel it was built for.
+  - Build dependencies (compiler + kernel headers) are resolved and
+    installed automatically on Debian/Ubuntu, Proxmox VE, Fedora/RHEL.
+    --test and --persistent remove what they installed when the script
+    finishes (success or failure); --dkms keeps it.
   - CONFIG (VERSION, SHA256) lives at the top of this script.
 EOF
 }
 
 check_build_deps() {
-  local missing=""
-  have gcc  || missing="${missing} gcc"
-  have make || missing="${missing} make"
-  [ -d "/lib/modules/${KVER}/build" ] || [ -d "/usr/src/linux-headers-${KVER}" ] \
-    || missing="${missing} linux-headers-${KVER}"
-  [ -z "$missing" ] || {
-    echo "error: missing packages required to build the module:$missing" >&2
-    echo "install them with:" >&2
-    echo "  sudo apt-get update" >&2
-    echo "  sudo apt-get install -y build-essential linux-headers-${KVER}" >&2
-    exit 1
-  }
+  # "exact" = only this kernel's headers, no distro meta package; packages
+  # installed here are tracked and removed by the cleanup trap below.
+  ensure_build_deps exact
 }
 
 check_dkms_deps() {
-  check_build_deps
-  have dkms || {
-    echo "error: missing package: dkms" >&2
-    echo "install it with:" >&2
-    echo "  sudo apt-get update && sudo apt-get install -y dkms" >&2
-    exit 1
-  }
+  ensure_dkms
 }
 
 # ============================================================================
@@ -152,9 +141,9 @@ resolve_local_source() {
 }
 
 fetch_release_tarball() {
-  # Sets the TMP_DIR (cleaned by the EXIT trap) and SRCDIR globals.
+  # Downloads and extracts the release tarball, then points SRCDIR at the
+  # extracted sources. Removing TMP_DIR is main()'s on_exit handler's job.
   TMP_DIR="$(mktemp -d)"
-  trap 'rm -rf "$TMP_DIR"' EXIT
 
   echo "downloading ${TARBALL_URL}" >&2
   curl -fsSL "$TARBALL_URL" -o "${TMP_DIR}/${TARBALL}" \
@@ -229,6 +218,7 @@ cmd_persistent() {
   local ko
   ko="$(build_module)"
 
+  install -d "/lib/modules/${KVER}/extra"
   install -m 0644 "$ko" "/lib/modules/${KVER}/extra/${MODULE}.ko"
   depmod -a
 
@@ -265,9 +255,14 @@ cmd_uninstall() {
   rm -f /etc/modprobe.d/minisforum-n5.conf /etc/modules-load.d/minisforum-n5.conf
   depmod -a
 
-  if have dkms && dkms status 2>/dev/null | grep -q "^minisforum-n5-it5571,"; then
+  # dkms < 3.0 prints "module, version, kernel, arch: ..."; dkms 3.x (Debian
+  # 12 / Proxmox 8+ / Fedora) prints "module/version, kernel, arch: ...".
+  # Match both, else the whole block is skipped on modern dkms and the driver
+  # would quietly re-register again after the next kernel update.
+  if have dkms && dkms status 2>/dev/null | grep -qE "^minisforum-n5-it5571[/,]"; then
     local ver
-    ver="$(dkms status | sed -n 's/^minisforum-n5-it5571, \([0-9.]*\).*/\1/p' | head -1)"
+    ver="$(dkms status | sed -n 's/^minisforum-n5-it5571[/,][[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -1 || true)"
+    [ -n "$ver" ] || ver="$VERSION"   # legacy/parsing fallback: current release
     dkms remove -m minisforum-n5-it5571 -v "$ver" --all 2>/dev/null || true
     rm -rf /usr/src/minisforum-n5-it5571-*
     status_msg="${status_msg}; removed DKMS registration"
@@ -281,7 +276,9 @@ cmd_uninstall() {
 # ============================================================================
 
 main() {
-  local action="test"
+  # Global, not local: the EXIT trap runs after main() returns, and it needs
+  # to know which mode was used.
+  action="test"
   ENABLE_WRITE=0
   for arg in "$@"; do
     case "$arg" in
@@ -295,6 +292,34 @@ main() {
     esac
   done
 
+  need_root
+
+  # Single point of cleanup, registered before anything can create temporary
+  # files, so every exit path below is covered: mode success, build failure,
+  # --uninstall, and a download that dies halfway. Bash keeps only the last
+  # trap set for a signal, so two separate EXIT traps would silently drop
+  # whichever was registered first. The handler reads $action and $TMP_DIR when
+  # it runs, so it does not matter that they are filled in later.
+  on_exit() {
+    # Defined only once the helper lib is sourced; the earlier exits have
+    # nothing to clean up anyway.
+    if declare -F cleanup_installed_deps >/dev/null 2>&1; then
+      case "$action" in
+        test|persistent) cleanup_installed_deps ;;
+      esac
+    fi
+    if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
+      echo "removing temporary directory ${TMP_DIR}" >&2
+      rm -rf "$TMP_DIR"
+    fi
+    return 0
+  }
+  trap on_exit EXIT
+
+  # Downloaded before the uninstall branch below: the removal itself lives in
+  # scripts/uninstall.sh, which the one-liner does not have on disk yet.
+  prepare_source "$@"
+
   if [ "$action" = "uninstall" ]; then
     cmd_uninstall
     exit 0
@@ -304,13 +329,15 @@ main() {
 
   prepare_source "$@"
 
-  # Everything below builds a kernel module, so give the build its own temp dir
-  # (reusing the tarball's temp dir in network mode) and guarantee cleanup even
-  # on failure.
-  if [ -z "$TMP_DIR" ]; then
-    TMP_DIR="$(mktemp -d)"
-    trap 'rm -rf "$TMP_DIR"' EXIT
-  fi
+  # Shared distro/kernel dependency resolution (os_family, ensure_build_deps,
+  # ensure_dkms). In checkout mode $SRCDIR is the repo root; in network mode
+  # it points into the extracted tarball, where the lib ships too.
+  . "$SRCDIR/scripts/lib/kernel-deps.sh"
+
+  # The build runs in a private temp dir. In the downloaded-tarball path this
+  # already exists and is reused; from a checkout it is created here. Either
+  # way on_exit removes it.
+  [ -n "$TMP_DIR" ] || TMP_DIR="$(mktemp -d)"
   setup_build_tree "$SRCDIR"
 
   case "$action" in

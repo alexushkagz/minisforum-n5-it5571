@@ -1,5 +1,5 @@
 #!/bin/bash
-# Minisforum N5 IT5571 — DKMS Install Script (Proxmox/Debian/Ubuntu)
+# Minisforum N5 IT5571 — DKMS Install Script (Debian/Ubuntu/Proxmox · Fedora/RHEL)
 #
 # Run as root: sudo ./setup-dkms.sh [--enable-write] [VERSION]
 #
@@ -10,9 +10,14 @@
 #                    install.sh passes the release version so the DKMS
 #                    package name matches the release tarball.
 #
+# Missing build dependencies (compiler + matching kernel headers) and the
+# dkms package are installed automatically for the detected distro.
 # After running, driver auto-rebuilds on every kernel update.
 
 set -euo pipefail
+
+# Shared distro/kernel dependency resolution.
+. "$(dirname "${BASH_SOURCE[0]}")/lib/kernel-deps.sh"
 
 DRIVER_NAME="minisforum-n5-it5571"
 DRIVER_VERSION="${DRIVER_VERSION:-0.3.0}"
@@ -51,21 +56,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-#  Package manager detection
+#  Dependencies: compiler, kernel headers (exact + future meta), dkms
 # ---------------------------------------------------------------------------
-if command -v apt-get &>/dev/null; then
-    PKG_INSTALL="apt-get update && apt-get install -y"
-elif command -v dnf &>/dev/null; then
-    PKG_INSTALL="dnf install -y"
-elif command -v yum &>/dev/null; then
-    PKG_INSTALL="yum install -y"
-else
-    echo "No supported package manager found (apt/dnf/yum)"
-    exit 1
-fi
-
-echo "Installing DKMS and kernel headers..."
-eval "${PKG_INSTALL} dkms linux-headers-$(uname -r)"
+echo "Ensuring build dependencies and dkms..."
+ensure_dkms
 
 # ---------------------------------------------------------------------------
 #  Populate DKMS tree with driver source
