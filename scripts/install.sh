@@ -36,7 +36,7 @@ set -euo pipefail
 #  CONFIG -- version and checksum of the release this installer installs.
 #  Cutting a new release means editing VERSION here, MODULE_VERSION in
 #  driver-prototype/minisforum_n5_it5571.c, and the default versions in
-#  release.sh, setup-dkms.sh and remove-dkms.sh.
+#  release.sh and setup-dkms.sh.
 # ============================================================================
 
 VERSION="0.3.0"                                        # matches git tag v0.3.0
@@ -64,7 +64,6 @@ TMP_DIR=""
 # ============================================================================
 
 die()   { echo "error: $*" >&2; exit 1; }
-have()  { command -v "$1" >/dev/null 2>&1; }
 need_root() { [ "$(id -u)" -eq 0 ] || die "run as root (sudo $0 ...)"; }
 
 usage() {
@@ -149,8 +148,10 @@ fetch_release_tarball() {
     || die "download failed -- is network up and tag v${VERSION} published?"
 
   if [[ "$SHA256" != \<* ]]; then
-    echo "${SHA256}  ${TMP_DIR}/${TARBALL}" | sha256sum --check - >/dev/null 2>&1 \
-      || die "checksum mismatch -- tarball tampered or SHA256 not updated in CONFIG"
+    if ! printf '%s  %s\n' "$SHA256" "${TMP_DIR}/${TARBALL}" | sha256sum --check - >/dev/null 2>&1; then
+      actual="$(sha256sum "${TMP_DIR}/${TARBALL}" | cut -d' ' -f1)"
+      die "checksum mismatch -- expected ${SHA256}, got ${actual}; re-run, or update SHA256 in CONFIG if this is a new release"
+    fi
   else
     echo "warning: SHA256 not configured at the top of the script; skipping integrity check" >&2
   fi
@@ -261,38 +262,10 @@ cmd_dkms() {
 }
 
 cmd_uninstall() {
-  need_root
-  # Each branch below appends what it did; the kernel is reported once, at the
-  # end, so the wording stays the same in every case.
-  local status_msg="module was not loaded"
-
-  if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
-    if modprobe -r "$MODULE" 2>/dev/null || rmmod "$MODULE" 2>/dev/null; then
-      status_msg="unloaded the running module"
-    else
-      echo "warning: module is in use and stays loaded; removing files/registration anyway" >&2
-      echo "  unload later with: modprobe -r ${MODULE}" >&2
-      status_msg="module still loaded (in use)"
-    fi
-  fi
-
-  rm -f "/lib/modules/${KVER}/extra/${MODULE}.ko"
-  rm -f /etc/modprobe.d/minisforum-n5.conf /etc/modules-load.d/minisforum-n5.conf
-  depmod -a
-
-  # dkms 3.0 changed its status format (was "name, version, ...", now
-  # "name/version, ..."). Match both, or newer dkms appears unregistered to
-  # this check and the driver is left behind.
-  if have dkms && dkms status 2>/dev/null | grep -qE "^minisforum-n5-it5571[/,]"; then
-    local ver
-    ver="$(dkms status | sed -n 's/^minisforum-n5-it5571[/,][[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -1 || true)"
-    [ -n "$ver" ] || ver="$VERSION"   # legacy/parsing fallback: current release
-    dkms remove -m minisforum-n5-it5571 -v "$ver" --all 2>/dev/null || true
-    rm -rf /usr/src/minisforum-n5-it5571-*
-    status_msg="${status_msg}; removed DKMS registration"
-  fi
-
-  echo "uninstall complete for kernel ${KVER}: ${status_msg}"
+  # uninstall.sh undoes every install mode (--test, --persistent, --dkms). It
+  # is part of the repo and of the release tarball, so it is available in both
+  # the checkout and the downloaded install path.
+  bash "$SRCDIR/scripts/uninstall.sh"
 }
 
 # ============================================================================
@@ -348,10 +321,6 @@ main() {
     cmd_uninstall
     exit 0
   fi
-
-  need_root
-
-  prepare_source "$@"
 
   # Helper lib with all the distro/kernel dependency logic. It is also shipped
   # inside the release tarball, so it exists in both the checkout and the

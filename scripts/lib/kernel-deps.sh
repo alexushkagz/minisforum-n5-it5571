@@ -32,7 +32,7 @@ MODULES_DIR="${MODULES_DIR:-/lib/modules}"
 # remove them again afterwards with cleanup_installed_deps).
 INSTALLED_DEPS=()
 
-# install.sh defines its own die/have because it needs them before this file is
+# install.sh defines its own die because it needs it before this file is
 # sourced; the copies are identical and both are needed.
 die()   { echo "error: $*" >&2; exit 1; }
 have()  { command -v "$1" >/dev/null 2>&1; }

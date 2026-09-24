@@ -39,10 +39,10 @@ Proxmox parts their own place:
   driver can be merged forward cleanly as the original project evolves.
 - **`scripts/`** — the installer. `install.sh` is the single entry point
   (one-liner, `--test` / `--persistent` / `--dkms` / `--uninstall`); the DKMS
-  helpers `setup-dkms.sh` / `remove-dkms.sh` can be run directly;
-  `lib/kernel-deps.sh` is the shared distro/kernel-header dependency resolver
-  used by all modes; and `release.sh` builds the release tarball (see
-  [Releasing](#releasing)).
+  helper `setup-dkms.sh` can be run directly; `lib/kernel-deps.sh` is the
+  shared distro/kernel-header dependency resolver used by all modes;
+  `uninstall.sh` is the standalone uninstaller; and `release.sh` builds the
+  release tarball (see [Releasing](#releasing)).
 - **`unraid-legacy/`** — everything Unraid-only from the original repository,
   moved here unchanged for reference: the plugin file, the WebGUI sources, the
   `.txz` and kernel build scripts, the reverse-engineering tools, the
@@ -101,11 +101,14 @@ Modes:
   meta-package) and dkms are installed once and **kept**.
 - `--uninstall` — detect what is installed and undo it.
 
-The DKMS helpers can also be run directly:
+The helper scripts can also be run directly. `setup-dkms.sh` performs a DKMS
+install. `uninstall.sh` is the full uninstaller: it takes no arguments and
+undoes `--dkms`, `--persistent` and `--test` installs alike, removing every
+registered DKMS version. It is what `install.sh --uninstall` calls.
 
 ```bash
 sudo ./scripts/setup-dkms.sh --enable-write
-sudo ./scripts/remove-dkms.sh
+sudo ./scripts/uninstall.sh
 ```
 
 ### Dependencies and kernel headers
@@ -148,8 +151,8 @@ layout, and prints the SHA256 the installer expects:
 
 ```bash
 # 1. Bump the version in scripts/install.sh (VERSION), the driver
-#    (MODULE_VERSION) and the defaults in release.sh, setup-dkms.sh and
-#    remove-dkms.sh. Commit, tag, push.
+#    (MODULE_VERSION) and the defaults in release.sh and setup-dkms.sh.
+#    Commit, tag, push.
 git tag -a v0.3.0 -m "v0.3.0: ..."
 git push origin v0.3.0
 
