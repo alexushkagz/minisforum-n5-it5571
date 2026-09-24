@@ -6,9 +6,8 @@
 #   --enable-write   Load with experimental_write=1 (PWM control enabled).
 #                    Default: read-only sensors, no PWM writes.
 #
-#   VERSION          DKMS package version (default: 0.3.0).
-#                    install.sh passes the release version so the DKMS
-#                    package name matches the release tarball.
+#   VERSION          optional DKMS package version. Defaults to the version
+#                    declared by MODULE_VERSION in the driver source.
 #
 # Missing build dependencies (compiler + matching kernel headers) and the
 # dkms package are installed automatically for the detected distro.
@@ -16,14 +15,12 @@
 
 set -euo pipefail
 
-# Shared distro/kernel dependency resolution.
 . "$(dirname "${BASH_SOURCE[0]}")/lib/kernel-deps.sh"
 
 DRIVER_NAME="minisforum-n5-it5571"
-DRIVER_VERSION="${DRIVER_VERSION:-0.3.0}"   # keep in sync with VERSION in install.sh
+DRIVER_VERSION="${DRIVER_VERSION:-}"
 ENABLE_WRITE=0
 
-# Parse arguments: --enable-write flag or positional VERSION
 for arg in "$@"; do
     case "$arg" in
         --enable-write) ENABLE_WRITE=1 ;;
@@ -32,9 +29,6 @@ for arg in "$@"; do
     esac
 done
 
-# ---------------------------------------------------------------------------
-#  Locate driver source (Makefile + .c) relative to this script.
-# ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DRIVER_SRC="${REPO_ROOT}/driver-prototype"
@@ -45,25 +39,18 @@ if [ ! -f "${DRIVER_SRC}/minisforum_n5_it5571.c" ] || [ ! -f "${DRIVER_SRC}/Make
     exit 1
 fi
 
+[ -n "$DRIVER_VERSION" ] || DRIVER_VERSION="$(driver_version "${DRIVER_SRC}/minisforum_n5_it5571.c")"
+
 DKMS_DIR="/usr/src/${DRIVER_NAME}-${DRIVER_VERSION}"
 
-# ---------------------------------------------------------------------------
-#  Root check
-# ---------------------------------------------------------------------------
 if [[ $EUID -ne 0 ]]; then
     echo "Run as root: sudo $0"
     exit 1
 fi
 
-# ---------------------------------------------------------------------------
-#  Dependencies: compiler + kernel headers (current and for future upgrades), dkms
-# ---------------------------------------------------------------------------
 echo "Ensuring build dependencies and dkms..."
 ensure_dkms
 
-# ---------------------------------------------------------------------------
-#  Populate DKMS tree with driver source
-# ---------------------------------------------------------------------------
 echo "Creating DKMS tree at ${DKMS_DIR}..."
 mkdir -p "${DKMS_DIR}"
 
@@ -79,9 +66,6 @@ DEST_MODULE_LOCATION[0]="/extra"
 AUTOINSTALL="yes"
 EOF
 
-# ---------------------------------------------------------------------------
-#  DKMS registration (idempotent: remove stale entry first)
-# ---------------------------------------------------------------------------
 echo "Registering with DKMS..."
 dkms remove -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}" --all 2>/dev/null || true
 dkms add -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
@@ -92,9 +76,6 @@ dkms build -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
 echo "Installing module..."
 dkms install -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
 
-# ---------------------------------------------------------------------------
-#  Load module and persist config
-# ---------------------------------------------------------------------------
 if [ "$ENABLE_WRITE" -eq 1 ]; then
     echo "Loading module with experimental_write=1 (PWM enabled)..."
     modprobe minisforum_n5_it5571 experimental_write=1

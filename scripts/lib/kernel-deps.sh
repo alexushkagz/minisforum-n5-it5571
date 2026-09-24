@@ -5,19 +5,16 @@
 # Supported: Debian / Ubuntu (regular kernel), Proxmox VE (pve kernel),
 # Fedora / RHEL family. Anything else is rejected by os_family().
 #
-# detect_kernel_headers [exact]  -- pick the header packages to install.
-#   Default: headers for the running kernel PLUS the distro's generic header
-#   package (linux-headers-amd64/-generic, kernel-devel), which follows future
-#   kernel updates -- needed so DKMS can rebuild after upgrades. "exact" keeps
-#   only the running kernel's headers, enough for a one-off --test/--persistent
-#   build. Exports KERNFAM, PKG_MGR, BUILD_PKGS and HEADER_PKGS.
+# driver_version FILE                  -- prints the version declared by the
+#   MODULE_VERSION string in the driver source.
 #
-# ensure_build_deps [exact]       -- installs only what is missing and records
-#   the packages in INSTALLED_DEPS so cleanup_installed_deps() can remove them
-#   again. All present -> no-op, nothing recorded.
-#
-# cleanup_installed_deps()        -- apt/dnf remove --purge + autoremove of
-#   INSTALLED_DEPS, best-effort (warns, never aborts). No-op when empty.
+# detect_kernel_headers [exact]  -- running-kernel headers only with "exact",
+#   otherwise also the distro's generic package so DKMS can rebuild after
+#   kernel updates. Exports KERNFAM, PKG_MGR, BUILD_PKGS, HEADER_PKGS.
+# ensure_build_deps [exact]       -- installs what is missing, recording the
+#   new packages in INSTALLED_DEPS.
+# cleanup_installed_deps()        -- best-effort removal of those packages and
+#   their orphans; warns, never aborts.
 #
 # Test hooks (environment overrides, no system changes needed):
 #   OS_RELEASE_FILE  path to an os-release file     (default: /etc/os-release)
@@ -28,18 +25,23 @@ OS_RELEASE_FILE="${OS_RELEASE_FILE:-/etc/os-release}"
 UNAME_R="${UNAME_R:-$(uname -r)}"
 MODULES_DIR="${MODULES_DIR:-/lib/modules}"
 
-# Packages this script installed during the current run (so the caller can
-# remove them again afterwards with cleanup_installed_deps).
 INSTALLED_DEPS=()
 
-# install.sh defines its own die because it needs it before this file is
-# sourced; the copies are identical and both are needed.
 die()   { echo "error: $*" >&2; exit 1; }
 have()  { command -v "$1" >/dev/null 2>&1; }
 warning() { echo "warning: $*" >&2; }
 
 apt_resolvable()  { apt-cache show "$1" >/dev/null 2>&1; }
 dnf_resolvable()  { dnf list --available "$1" >/dev/null 2>&1; }
+
+driver_version() {
+  local v
+  v="$(sed -n 's/.*MODULE_VERSION[[:space:]]*([[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -1)"
+  # sed exits 0 even when nothing matched, so an empty result means the source
+  # is missing or the line was reformatted -- never treat that as a version.
+  [ -n "$v" ] || die "cannot read MODULE_VERSION from ${1}"
+  echo "$v"
+}
 
 os_family() {
   case "$UNAME_R" in
@@ -167,9 +169,6 @@ ensure_build_deps() {
     || die "kernel headers for ${UNAME_R} were installed, but ${MODULES_DIR}/${UNAME_R}/build is missing"
 }
 
-# Removes whatever packages this run installed (see INSTALLED_DEPS), plus their
-# transitive orphans. A no-op when nothing was installed. Never aborts; the
-# cleanup is best-effort.
 cleanup_installed_deps() {
   [ "${#INSTALLED_DEPS[@]}" -eq 0 ] && return 0
 

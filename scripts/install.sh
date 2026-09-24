@@ -1,56 +1,17 @@
 #!/usr/bin/env bash
 #
-# Minisforum N5 (IT5571) fan driver -- installer for Proxmox/Debian
+# Minisforum N5 (IT5571) fan driver -- installer (Debian/Ubuntu, Proxmox VE, Fedora/RHEL)
 #
-# Two ways to run it:
-#
-#   From the network (downloads the release tarball, verifies its checksum,
-#   and installs directly from the extracted sources):
-#
-#     bash -c "$(curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/install.sh)" install.sh --help
-#     curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/install.sh | bash -s -- --dkms
-#
-#   From a checkout of this repository (nothing is downloaded):
-#
-#     sudo ./scripts/install.sh --persistent
-#
-# Modes:
-#   (no flag)  --test         build + insmod into the running kernel (read-only,
-#                             no PWM writes). Nothing is persisted. Reboot.
-#   --persistent              install into /lib/modules/<kver>/extra + modprobe
-#                             config. Survives reboots; should be rebuilt after
-#                             kernel updates.
-#   --dkms                    full DKMS install, auto-rebuilt on kernel updates.
-#   --uninstall               detect what is installed (insmod/modprobe/DKMS)
-#                             and undo it, including config and /usr/src.
-#   --help                    this help.
-#
-# Flags:
-#   --enable-write            load with experimental_write=1 (PWM control
-#                             enabled). Default: read-only sensors, no PWM
-#                             writes. Works with any of the mode flags above.
+# Builds and installs the driver from the sources sitting next to this script.
+# Run it with --help for the available modes and flags.
 #
 set -euo pipefail
 
 # ============================================================================
-#  CONFIG -- version and checksum of the release this installer installs.
-#  Cutting a new release means editing VERSION here, MODULE_VERSION in
-#  driver-prototype/minisforum_n5_it5571.c, and the default versions in
-#  release.sh and setup-dkms.sh.
+#  CONFIG
 # ============================================================================
 
-VERSION="0.3.0"                                        # matches git tag v0.3.0
-SHA256="<REPLACE: 64 hex chars from: sha256sum minisforum-n5-it5571-0.3.0.tar.gz>"
-
-GH_USER="alexushkagz"
-GH_REPO="minisforum-n5-it5571"
-
 MODULE="minisforum_n5_it5571"
-
-# Derived URLs -- nothing below this line needs editing per release.
-BASE_URL="https://github.com/${GH_USER}/${GH_REPO}/releases/download/v${VERSION}"
-TARBALL="minisforum-n5-it5571-${VERSION}.tar.gz"
-TARBALL_URL="${BASE_URL}/${TARBALL}"
 
 KVER="$(uname -r)"
 ARCH="$(uname -m)"
@@ -68,11 +29,12 @@ need_root() { [ "$(id -u)" -eq 0 ] || die "run as root (sudo $0 ...)"; }
 
 usage() {
   cat <<'EOF'
-Minisforum N5 (IT5571) driver installer for Proxmox/Debian
+Minisforum N5 (IT5571) driver installer (Debian/Ubuntu, Proxmox VE, Fedora/RHEL)
 
 Usage:
   install.sh [--test | --persistent | --dkms | --uninstall | --help] [--enable-write]
 
+Modes:
   (default) --test
         Build the module and insmod it into the RUNNING kernel.
         Read-only sensors: no PWM writes. Nothing is persisted;
@@ -93,6 +55,10 @@ Usage:
         and undoes it: unloads, removes the .ko, depmod, deletes the
         modprobe/load config files and the /usr/src DKMS tree.
 
+  --help
+        Show this help.
+
+Flags:
   --enable-write
         Load the module with experimental_write=1 (PWM control enabled).
         The default is READ-ONLY sensors, no PWM writes -- enable this
@@ -109,7 +75,6 @@ Notes:
     installed automatically on Debian/Ubuntu, Proxmox VE, Fedora/RHEL.
     --test and --persistent remove what they installed when the script
     finishes (success or failure); --dkms keeps it.
-  - CONFIG (VERSION, SHA256) lives at the top of this script.
 EOF
 }
 
@@ -121,13 +86,11 @@ check_build_deps() {
 }
 
 # ============================================================================
-#  Source acquisition: prefer the local repo checkout; otherwise download the
-#  release tarball from GitHub and install from the extracted files.
+#  Source acquisition: locate the sources that belong to this script. A clone
+#  and an unpacked release have the same layout, so one lookup covers both.
 # ============================================================================
 
 resolve_local_source() {
-  # When install.sh is run from a git checkout it lives in scripts/, with the
-  # driver sources one directory up. Echo the repo root if that layout exists.
   local here repo_root
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   repo_root="$(cd "${here}/.." && pwd)"
@@ -138,49 +101,10 @@ resolve_local_source() {
   return 1
 }
 
-fetch_release_tarball() {
-  # Downloads and extracts the release tarball, then points SRCDIR at the
-  # extracted sources. Removing TMP_DIR is main()'s on_exit handler's job.
-  TMP_DIR="$(mktemp -d)"
-
-  echo "downloading ${TARBALL_URL}" >&2
-  curl -fsSL "$TARBALL_URL" -o "${TMP_DIR}/${TARBALL}" \
-    || die "download failed -- is network up and tag v${VERSION} published?"
-
-  if [[ "$SHA256" != \<* ]]; then
-    if ! printf '%s  %s\n' "$SHA256" "${TMP_DIR}/${TARBALL}" | sha256sum --check - >/dev/null 2>&1; then
-      actual="$(sha256sum "${TMP_DIR}/${TARBALL}" | cut -d' ' -f1)"
-      die "checksum mismatch -- expected ${SHA256}, got ${actual}; re-run, or update SHA256 in CONFIG if this is a new release"
-    fi
-  else
-    echo "warning: SHA256 not configured at the top of the script; skipping integrity check" >&2
-  fi
-
-  tar -xzf "${TMP_DIR}/${TARBALL}" -C "$TMP_DIR"
-
-  # The folder the tarball extracts to depends on how the tarball was built,
-  # so its name cannot be assumed. Find the extracted top-level folder and
-  # accept it only if it holds the sources and shared lib we build from.
-  local cand
-  for cand in "$TMP_DIR"/*/; do
-    [ -d "$cand" ] || continue
-    [ -f "${cand}driver-prototype/${MODULE}.c" ] && [ -f "${cand}scripts/lib/kernel-deps.sh" ] || continue
-    SRCDIR="${cand%/}"
-    return 0
-  done
-  die "${TARBALL} does not look like a release tarball: expected one top-level folder containing driver-prototype/ and scripts/lib/"
-}
-
 prepare_source() {
-  local src
-  if src="$(resolve_local_source)"; then
-    SRCDIR="$src"
-    return 0
-  fi
-  # No checkout found (install.sh was probably piped via curl): download the
-  # release tarball and install from it.
   [ "$ARCH" = "x86_64" ] || die "unsupported architecture: ${ARCH} (x86_64 required)"
-  fetch_release_tarball
+  SRCDIR="$(resolve_local_source)" \
+    || die "driver sources not found next to this script -- expected driver-prototype/ one directory above scripts/."
 }
 
 # ============================================================================
@@ -254,17 +178,12 @@ cmd_persistent() {
 }
 
 cmd_dkms() {
-  # setup-dkms.sh installs any missing dependencies itself; this mode only
-  # forwards the write flag and the release version.
   local args=()
   [ "$ENABLE_WRITE" -eq 1 ] && args+=(--enable-write)
-  bash "$1/scripts/setup-dkms.sh" "${args[@]}" "$VERSION"
+  bash "$1/scripts/setup-dkms.sh" "${args[@]}"
 }
 
 cmd_uninstall() {
-  # uninstall.sh undoes every install mode (--test, --persistent, --dkms). It
-  # is part of the repo and of the release tarball, so it is available in both
-  # the checkout and the downloaded install path.
   bash "$SRCDIR/scripts/uninstall.sh"
 }
 
@@ -273,8 +192,7 @@ cmd_uninstall() {
 # ============================================================================
 
 main() {
-  # Global, not local: the EXIT trap runs after main() returns, and it needs
-  # to know which mode was used.
+  # Global, not local: the EXIT trap reads it after main() returns.
   action="test"
   ENABLE_WRITE=0
   for arg in "$@"; do
@@ -291,15 +209,10 @@ main() {
 
   need_root
 
-  # Single point of cleanup, registered before anything can create temporary
-  # files, so every exit path below is covered: mode success, build failure,
-  # --uninstall, and a download that dies halfway. Bash keeps only the last
-  # trap set for a signal, so two separate EXIT traps would silently drop
-  # whichever was registered first. The handler reads $action and $TMP_DIR when
-  # it runs, so it does not matter that they are filled in later.
+  # Registered before anything can create temporary state, so every exit path
+  # is covered. Bash keeps only the last trap set for a signal, so two
+  # separate EXIT traps would silently drop whichever came first.
   on_exit() {
-    # Defined only once the helper lib is sourced; the earlier exits have
-    # nothing to clean up anyway.
     if declare -F cleanup_installed_deps >/dev/null 2>&1; then
       case "$action" in
         test|persistent) cleanup_installed_deps ;;
@@ -313,8 +226,6 @@ main() {
   }
   trap on_exit EXIT
 
-  # Downloaded before the uninstall branch below: the removal itself lives in
-  # scripts/uninstall.sh, which the one-liner does not have on disk yet.
   prepare_source "$@"
 
   if [ "$action" = "uninstall" ]; then
@@ -322,15 +233,9 @@ main() {
     exit 0
   fi
 
-  # Helper lib with all the distro/kernel dependency logic. It is also shipped
-  # inside the release tarball, so it exists in both the checkout and the
-  # downloaded install path.
   . "$SRCDIR/scripts/lib/kernel-deps.sh"
 
-  # The build runs in a private temp dir. In the downloaded-tarball path this
-  # already exists and is reused; from a checkout it is created here. Either
-  # way on_exit removes it.
-  [ -n "$TMP_DIR" ] || TMP_DIR="$(mktemp -d)"
+  TMP_DIR="$(mktemp -d)"
   setup_build_tree "$SRCDIR"
 
   case "$action" in

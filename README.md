@@ -1,4 +1,4 @@
-# Minisforum N5 fan driver for Proxmox VE
+# Minisforum N5 fan driver for Proxmox VE, Debian/Ubuntu and Fedora/RHEL
 
 The Minisforum N5-family NAS has no fan control in the Linux kernel: all the
 work is done by an embedded controller (ITE IT5571) that only the BIOS knows
@@ -37,17 +37,19 @@ Proxmox parts their own place:
 - **`driver-prototype/`** — the driver itself: `minisforum_n5_it5571.c` and the
   kernel module `Makefile`. The path mirrors the upstream repo exactly, so the
   driver can be merged forward cleanly as the original project evolves.
-- **`scripts/`** — the installer. `install.sh` is the single entry point
-  (one-liner, `--test` / `--persistent` / `--dkms` / `--uninstall`); the DKMS
-  helper `setup-dkms.sh` can be run directly; `lib/kernel-deps.sh` is the
-  shared distro/kernel-header dependency resolver used by all modes;
-  `uninstall.sh` is the standalone uninstaller; and `release.sh` builds the
-  release tarball (see [Releasing](#releasing)).
+- **`scripts/`** — `install.sh` builds and installs the driver from the sources
+  next to it, so it runs either from a clone or from inside an unpacked
+  release. `get.sh` is the download entrypoint: it fetches a release, verifies
+  its checksum and hands over to `install.sh`. `setup-dkms.sh` and
+  `uninstall.sh` are the DKMS installer and the standalone uninstaller, both
+  runnable directly. `lib/kernel-deps.sh` holds the shared distro/kernel-header
+  logic, and `release.sh` builds the release artifacts (see
+  [Releasing](#releasing)).
 - **`unraid-legacy/`** — everything Unraid-only from the original repository,
   moved here unchanged for reference: the plugin file, the WebGUI sources, the
   `.txz` and kernel build scripts, the reverse-engineering tools, the
   screenshots, and all the original documentation. Nothing in this folder is
-  needed to run the driver on Proxmox.
+  needed to run the driver.
 - **`LICENSE` / `LICENSES/`** — the GPL-2.0 material covering the driver
   source.
 
@@ -72,15 +74,22 @@ build dependencies (compiler + matching kernel headers) automatically, and
 supports Debian/Ubuntu with a stock kernel, Proxmox VE (`-pve` kernel), and the
 Fedora/RHEL family (Fedora 8+).
 
+**One-liner** — `get.sh` downloads the release archive, verifies its SHA-256,
+and hands over to the installer:
+
 ```bash
-# One-liner (downloads the release and verifies its checksum):
-sudo bash -c "$(curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/install.sh)" install.sh --persistent
+sudo bash -c "$(curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/get.sh)" -- --persistent
 
 # Pipe variant of the same one-liner:
-curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/install.sh \
+curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/get.sh \
   | sudo bash -s -- --persistent
+```
 
-# Or from a checkout of this repository:
+**From a clone** — build and install straight from the checkout:
+
+```bash
+git clone https://github.com/alexushkagz/minisforum-n5-it5571
+cd minisforum-n5-it5571
 sudo ./scripts/install.sh --persistent
 ```
 
@@ -113,11 +122,10 @@ sudo ./scripts/uninstall.sh
 
 ### Dependencies and kernel headers
 
-Build dependencies are installed automatically for every mode. `--test` and
-`--persistent` install only the headers for your running kernel and remove them
-again when the run finishes. `--dkms` keeps the toolchain and headers installed
-and adds the distro's generic header package as well, so DKMS can rebuild
-automatically after kernel upgrades:
+Build dependencies are installed automatically. `--test` and `--persistent`
+install the headers for the running kernel and remove them again when the run
+finishes; `--dkms` also installs the distro's generic header package so DKMS can
+rebuild after kernel upgrades:
 
 | Platform         | Installed by the scripts                                                     |
 | ---------------- | ---------------------------------------------------------------------------- |
@@ -144,32 +152,43 @@ can do the fan-speed curves for you.
 
 ## Releasing
 
-The installer downloads a release tarball and copies `driver-prototype/` and
-`scripts/lib/` out of it, so both must live inside one top-level folder in the
-archive. `scripts/release.sh` builds the tarball from a git tag, checks its
-layout, and prints the SHA256 the installer expects:
+The version is written down in exactly one place — the `MODULE_VERSION` string
+in `driver-prototype/minisforum_n5_it5571.c`. `install.sh`, `setup-dkms.sh` and
+`release.sh` all read it from there, so nothing can drift out of step.
+
+`scripts/release.sh` builds the three artifacts a GitHub release needs:
+
+```
+dist/minisforum-n5-it5571-<version>.tar.gz        the source archive
+dist/minisforum-n5-it5571-<version>.tar.gz.sha256  its checksum
+dist/get.sh                                       the entrypoint, with the
+                                                  version and checksum filled in
+```
 
 ```bash
-# 1. Bump the version in scripts/install.sh (VERSION), the driver
-#    (MODULE_VERSION) and the defaults in release.sh and setup-dkms.sh.
-#    Commit, tag, push.
+# 1. Bump MODULE_VERSION in driver-prototype/minisforum_n5_it5571.c, commit,
+#    tag and push. release.sh refuses to run if the tag and the source disagree.
 git tag -a v0.3.0 -m "v0.3.0: ..."
 git push origin v0.3.0
 
-# 2. Build the tarball and read the SHA256 it prints.
+# 2. Build the artifacts (they are written to dist/, which is gitignored).
 scripts/release.sh
-# paste the printed SHA256="..." into scripts/install.sh (the CONFIG block at
-# the top of the file), commit that update and push.
 
-# 3. Publish both assets -- the one-liner installs from scripts/install.sh,
-#    so it must be uploaded as a release asset too.
+# 3. Publish the artifacts (the one-liner fetches get.sh).
 gh release create v0.3.0 dist/minisforum-n5-it5571-0.3.0.tar.gz --title "v0.3.0"
-gh release upload v0.3.0 scripts/install.sh
+gh release upload v0.3.0 dist/minisforum-n5-it5571-0.3.0.tar.gz.sha256 dist/get.sh
 ```
 
-Everything the installer needs must be committed before tagging: a `git archive`
-only contains committed files, and `scripts/release.sh` aborts if the tarball is
-missing the driver source or `scripts/lib/kernel-deps.sh`.
+The archive ships only what the installer needs at runtime; `.gitattributes`
+decides that. Everything must be committed before tagging, because `git archive`
+reads committed files only, and `get.sh` refuses to install from an incomplete
+archive.
+
+The checksum file is there for people who want to verify by hand:
+
+```bash
+cd dist && sha256sum -c minisforum-n5-it5571-0.3.0.tar.gz.sha256
+```
 
 ## Original documentation
 

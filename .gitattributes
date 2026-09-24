@@ -1,0 +1,13 @@
+# Affects release archives (git archive), not clones or the working tree.
+# The runtime archive ships driver-prototype/ and the installer scripts;
+# everything marked here is reference material, maintainer tooling, or a
+# template whose published copy is generated at release time.
+
+# Unraid-only reference: docs, screenshots, the original WebGUI.
+/unraid-legacy/**  export-ignore
+
+# Source template; releases publish a generated copy with real values.
+/scripts/get.sh     export-ignore
+
+# Maintainer-only tooling, not used at install time.
+/scripts/release.sh export-ignore

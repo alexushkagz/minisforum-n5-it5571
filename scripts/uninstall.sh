@@ -1,16 +1,10 @@
 #!/bin/bash
 # Minisforum N5 IT5571 — uninstaller
 #
-# Run as root: sudo ./uninstall.sh          (no arguments)
+# Run as root: sudo ./scripts/uninstall.sh      (no arguments)
 #
-# Undoes any install mode this project provides:
-#   --test         unloads the module; nothing else was written to disk
-#   --persistent   the above plus /lib/modules/<kernel>/extra/<module>.ko
-#   --dkms         the above plus the DKMS registration and its /usr/src tree
-#
-# In every case the modprobe options and auto-load config files are removed as
-# well. All registered DKMS versions are removed, so leftovers from older
-# releases go away with the current one.
+# Removes every install mode, including all registered DKMS versions, the
+# modprobe/auto-load config, and the module of a --persistent install.
 #
 # A module that is in use cannot be unloaded. The script says so and removes
 # the files anyway; unload it later with "modprobe -r minisforum_n5_it5571".
@@ -34,10 +28,7 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# ---------------------------------------------------------------------------
-#  Unload the running module. A module in use stays loaded; warn and carry on
-#  so the rest of the cleanup still happens.
-# ---------------------------------------------------------------------------
+# A module in use stays loaded; warn and continue so the rest still runs.
 status_msg="module was not loaded"
 if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
     if modprobe -r "$MODULE" 2>/dev/null || rmmod "$MODULE" 2>/dev/null; then
@@ -49,12 +40,7 @@ if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
     fi
 fi
 
-# ---------------------------------------------------------------------------
-#  DKMS registrations. dkms changed its status format in 3.0: older releases
-#  print "name, version, kernel, arch", newer ones "name/version, kernel,
-#  arch" -- match both. Every registered version is removed, so leftovers from
-#  older releases go away with the current one.
-# ---------------------------------------------------------------------------
+# Parse both DKMS status formats: "name, version, ..." (dkms < v3.0) and "name/version, ...".
 failed_versions=()
 if have dkms; then
     versions="$(dkms status 2>/dev/null | sed -n "s/^${DRIVER_NAME}[/,][[:space:]]*\([0-9][0-9.]*\).*/\1/p" | sort -u || true)"
@@ -77,9 +63,8 @@ if have dkms; then
     fi
 fi
 
-# Source trees of removed versions, plus orphans from older releases. A version
-# whose removal failed keeps its tree: the DKMS entry still points at it and
-# needs it to rebuild after a kernel update or to retry the removal.
+# Keep the source tree of any version whose dkms remove failed: its
+# registration still references that tree.
 echo "Removing DKMS source tree..."
 for tree in "/usr/src/${DRIVER_NAME}"*; do
     [ -e "$tree" ] || continue
