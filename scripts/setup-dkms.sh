@@ -20,7 +20,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/kernel-deps.sh"
 
 DRIVER_NAME="minisforum-n5-it5571"
-DRIVER_VERSION="${DRIVER_VERSION:-0.3.0}"
+DRIVER_VERSION="${DRIVER_VERSION:-0.3.0}"   # keep in sync with VERSION in install.sh
 ENABLE_WRITE=0
 
 # Parse arguments: --enable-write flag or positional VERSION
@@ -56,7 +56,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-#  Dependencies: compiler, kernel headers (exact + future meta), dkms
+#  Dependencies: compiler + kernel headers (current and for future upgrades), dkms
 # ---------------------------------------------------------------------------
 echo "Ensuring build dependencies and dkms..."
 ensure_dkms

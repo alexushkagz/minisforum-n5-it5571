@@ -39,9 +39,10 @@ Proxmox parts their own place:
   driver can be merged forward cleanly as the original project evolves.
 - **`scripts/`** — the installer. `install.sh` is the single entry point
   (one-liner, `--test` / `--persistent` / `--dkms` / `--uninstall`); the DKMS
-  helpers `setup-dkms.sh` / `remove-dkms.sh` can be run directly; and
+  helpers `setup-dkms.sh` / `remove-dkms.sh` can be run directly;
   `lib/kernel-deps.sh` is the shared distro/kernel-header dependency resolver
-  used by all modes.
+  used by all modes; and `release.sh` builds the release tarball (see
+  [Releasing](#releasing)).
 - **`unraid-legacy/`** — everything Unraid-only from the original repository,
   moved here unchanged for reference: the plugin file, the WebGUI sources, the
   `.txz` and kernel build scripts, the reverse-engineering tools, the
@@ -72,7 +73,7 @@ supports Debian/Ubuntu with a stock kernel, Proxmox VE (`-pve` kernel), and the
 Fedora/RHEL family (Fedora 8+).
 
 ```bash
-# One-liner (downloads the pinned release and verifies its checksum):
+# One-liner (downloads the release and verifies its checksum):
 sudo bash -c "$(curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/install.sh)" install.sh --persistent
 
 # Pipe variant of the same one-liner:
@@ -109,9 +110,11 @@ sudo ./scripts/remove-dkms.sh
 
 ### Dependencies and kernel headers
 
-Build dependencies are installed automatically for every mode. Both the exact
-headers for your running kernel and the distro's "future" meta-package are
-installed, so that DKMS can also rebuild after later kernel upgrades:
+Build dependencies are installed automatically for every mode. `--test` and
+`--persistent` install only the headers for your running kernel and remove them
+again when the run finishes. `--dkms` keeps the toolchain and headers installed
+and adds the distro's generic header package as well, so DKMS can rebuild
+automatically after kernel upgrades:
 
 | Platform         | Installed by the scripts                                                     |
 | ---------------- | ---------------------------------------------------------------------------- |
@@ -135,6 +138,35 @@ it was built for, so always build on the target machine rather than copying
 `.ko` files between systems. And once the module is up, standard tools like
 `pwmconfig`/`fancontrol` or [CoolerControl](https://github.com/CoolerControl/CoolerControl)
 can do the fan-speed curves for you.
+
+## Releasing
+
+The installer downloads a release tarball and copies `driver-prototype/` and
+`scripts/lib/` out of it, so both must live inside one top-level folder in the
+archive. `scripts/release.sh` builds the tarball from a git tag, checks its
+layout, and prints the SHA256 the installer expects:
+
+```bash
+# 1. Bump the version in scripts/install.sh (VERSION), the driver
+#    (MODULE_VERSION) and the defaults in release.sh, setup-dkms.sh and
+#    remove-dkms.sh. Commit, tag, push.
+git tag -a v0.3.0 -m "v0.3.0: ..."
+git push origin v0.3.0
+
+# 2. Build the tarball and read the SHA256 it prints.
+scripts/release.sh
+# paste the printed SHA256="..." into scripts/install.sh (the CONFIG block at
+# the top of the file), commit that update and push.
+
+# 3. Publish both assets -- the one-liner installs from scripts/install.sh,
+#    so it must be uploaded as a release asset too.
+gh release create v0.3.0 dist/minisforum-n5-it5571-0.3.0.tar.gz --title "v0.3.0"
+gh release upload v0.3.0 scripts/install.sh
+```
+
+Everything the installer needs must be committed before tagging: a `git archive`
+only contains committed files, and `scripts/release.sh` aborts if the tarball is
+missing the driver source or `scripts/lib/kernel-deps.sh`.
 
 ## Original documentation
 

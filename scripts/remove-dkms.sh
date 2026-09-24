@@ -12,7 +12,7 @@
 set -euo pipefail
 
 DRIVER_NAME="minisforum-n5-it5571"
-DRIVER_VERSION="${DRIVER_VERSION:-0.3.0}"
+DRIVER_VERSION="${DRIVER_VERSION:-0.3.0}"   # keep in sync with VERSION in install.sh
 
 # Accept VERSION as first positional argument (override env/default)
 for arg in "$@"; do

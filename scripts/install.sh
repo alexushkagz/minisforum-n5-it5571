@@ -4,7 +4,7 @@
 #
 # Two ways to run it:
 #
-#   From the network (downloads the pinned release tarball, verifies it,
+#   From the network (downloads the release tarball, verifies its checksum,
 #   and installs directly from the extracted sources):
 #
 #     bash -c "$(curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/install.sh)" install.sh --help
@@ -27,14 +27,16 @@
 #
 # Flags:
 #   --enable-write            load with experimental_write=1 (PWM control
-#                             enabled). Default is READ-ONLY: laboratory/test
-#                             value, sensors only, no PWM writes. Accepted in
-#                             any position relative to the mode flag.
+#                             enabled). Default: read-only sensors, no PWM
+#                             writes. Works with any of the mode flags above.
 #
 set -euo pipefail
 
 # ============================================================================
-#  CONFIG -- the only block to edit when a new release is cut.
+#  CONFIG -- version and checksum of the release this installer installs.
+#  Cutting a new release means editing VERSION here, MODULE_VERSION in
+#  driver-prototype/minisforum_n5_it5571.c, and the default versions in
+#  release.sh, setup-dkms.sh and remove-dkms.sh.
 # ============================================================================
 
 VERSION="0.3.0"                                        # matches git tag v0.3.0
@@ -113,23 +115,20 @@ EOF
 }
 
 check_build_deps() {
-  # "exact" = only this kernel's headers, no distro meta package; packages
-  # installed here are tracked and removed by the cleanup trap below.
+  # --test/--persistent only need headers for the running kernel, so "exact"
+  # skips the distro's generic header packages (those matter only for future
+  # DKMS rebuilds). Anything installed here is removed again on exit.
   ensure_build_deps exact
 }
 
-check_dkms_deps() {
-  ensure_dkms
-}
-
 # ============================================================================
-#  Source acquisition: use the repo checkout if present, otherwise fetch the
-#  pinned release tarball into a temp dir and build from the extracted tree.
+#  Source acquisition: prefer the local repo checkout; otherwise download the
+#  release tarball from GitHub and install from the extracted files.
 # ============================================================================
 
 resolve_local_source() {
-  # This script normally lives in scripts/; the driver sources are one level
-  # up. Return the REPO ROOT, which every other function expects.
+  # When install.sh is run from a git checkout it lives in scripts/, with the
+  # driver sources one directory up. Echo the repo root if that layout exists.
   local here repo_root
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   repo_root="$(cd "${here}/.." && pwd)"
@@ -157,7 +156,18 @@ fetch_release_tarball() {
   fi
 
   tar -xzf "${TMP_DIR}/${TARBALL}" -C "$TMP_DIR"
-  SRCDIR="${TMP_DIR}/minisforum-n5-it5571-${VERSION}"
+
+  # The folder the tarball extracts to depends on how the tarball was built,
+  # so its name cannot be assumed. Find the extracted top-level folder and
+  # accept it only if it holds the sources and shared lib we build from.
+  local cand
+  for cand in "$TMP_DIR"/*/; do
+    [ -d "$cand" ] || continue
+    [ -f "${cand}driver-prototype/${MODULE}.c" ] && [ -f "${cand}scripts/lib/kernel-deps.sh" ] || continue
+    SRCDIR="${cand%/}"
+    return 0
+  done
+  die "${TARBALL} does not look like a release tarball: expected one top-level folder containing driver-prototype/ and scripts/lib/"
 }
 
 prepare_source() {
@@ -166,9 +176,8 @@ prepare_source() {
     SRCDIR="$src"
     return 0
   fi
-  # Running from a pipe or temp copy: fall back to the pinned release tarball
-  # and build directly from its extracted tree (nothing is downloaded when a
-  # checkout is available).
+  # No checkout found (install.sh was probably piped via curl): download the
+  # release tarball and install from it.
   [ "$ARCH" = "x86_64" ] || die "unsupported architecture: ${ARCH} (x86_64 required)"
   fetch_release_tarball
 }
@@ -178,7 +187,7 @@ prepare_source() {
 # ============================================================================
 
 setup_build_tree() {
-  # Keep build artifacts out of the repo checkout: build on a fresh copy.
+  # Build in a private copy so compiled files never land in the checkout.
   mkdir -p "$TMP_DIR"
   cp -r "$1/driver-prototype" "$TMP_DIR/driver-prototype"
   make -C "/lib/modules/${KVER}/build" M="$TMP_DIR/driver-prototype" clean >/dev/null 2>&1 || true
@@ -222,6 +231,14 @@ cmd_persistent() {
   install -m 0644 "$ko" "/lib/modules/${KVER}/extra/${MODULE}.ko"
   depmod -a
 
+  # A leftover DKMS/distro copy of the module would be picked by modprobe
+  # from a higher-priority directory and shadow the file we just installed.
+  # Check that modprobe resolves to our .ko before loading anything.
+  local wanted actual
+  wanted="/lib/modules/${KVER}/extra/${MODULE}.ko"
+  actual="$(modinfo -n "$MODULE" 2>/dev/null || echo "$wanted")"
+  [ "$actual" = "$wanted" ] || die "modprobe ${MODULE} resolves to ${actual}, not the freshly built ${wanted} -- a DKMS/distro install shadows it (run: install.sh --uninstall, or use --dkms)"
+
   if [ "$ENABLE_WRITE" -eq 1 ]; then
     echo "options ${MODULE} experimental_write=1" > /etc/modprobe.d/minisforum-n5.conf
   else
@@ -236,7 +253,8 @@ cmd_persistent() {
 }
 
 cmd_dkms() {
-  check_dkms_deps
+  # setup-dkms.sh installs any missing dependencies itself; this mode only
+  # forwards the write flag and the release version.
   local args=()
   [ "$ENABLE_WRITE" -eq 1 ] && args+=(--enable-write)
   bash "$1/scripts/setup-dkms.sh" "${args[@]}" "$VERSION"
@@ -244,21 +262,27 @@ cmd_dkms() {
 
 cmd_uninstall() {
   need_root
-  local status_msg="${KVER}: nothing found to remove"
+  # Each branch below appends what it did; the kernel is reported once, at the
+  # end, so the wording stays the same in every case.
+  local status_msg="module was not loaded"
 
   if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
-    modprobe -r "$MODULE" || rmmod "$MODULE"
-    status_msg="unloaded running module"
+    if modprobe -r "$MODULE" 2>/dev/null || rmmod "$MODULE" 2>/dev/null; then
+      status_msg="unloaded the running module"
+    else
+      echo "warning: module is in use and stays loaded; removing files/registration anyway" >&2
+      echo "  unload later with: modprobe -r ${MODULE}" >&2
+      status_msg="module still loaded (in use)"
+    fi
   fi
 
   rm -f "/lib/modules/${KVER}/extra/${MODULE}.ko"
   rm -f /etc/modprobe.d/minisforum-n5.conf /etc/modules-load.d/minisforum-n5.conf
   depmod -a
 
-  # dkms < 3.0 prints "module, version, kernel, arch: ..."; dkms 3.x (Debian
-  # 12 / Proxmox 8+ / Fedora) prints "module/version, kernel, arch: ...".
-  # Match both, else the whole block is skipped on modern dkms and the driver
-  # would quietly re-register again after the next kernel update.
+  # dkms 3.0 changed its status format (was "name, version, ...", now
+  # "name/version, ..."). Match both, or newer dkms appears unregistered to
+  # this check and the driver is left behind.
   if have dkms && dkms status 2>/dev/null | grep -qE "^minisforum-n5-it5571[/,]"; then
     local ver
     ver="$(dkms status | sed -n 's/^minisforum-n5-it5571[/,][[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -1 || true)"
@@ -268,7 +292,7 @@ cmd_uninstall() {
     status_msg="${status_msg}; removed DKMS registration"
   fi
 
-  echo "uninstall complete: ${status_msg}"
+  echo "uninstall complete for kernel ${KVER}: ${status_msg}"
 }
 
 # ============================================================================
@@ -329,9 +353,9 @@ main() {
 
   prepare_source "$@"
 
-  # Shared distro/kernel dependency resolution (os_family, ensure_build_deps,
-  # ensure_dkms). In checkout mode $SRCDIR is the repo root; in network mode
-  # it points into the extracted tarball, where the lib ships too.
+  # Helper lib with all the distro/kernel dependency logic. It is also shipped
+  # inside the release tarball, so it exists in both the checkout and the
+  # downloaded install path.
   . "$SRCDIR/scripts/lib/kernel-deps.sh"
 
   # The build runs in a private temp dir. In the downloaded-tarball path this

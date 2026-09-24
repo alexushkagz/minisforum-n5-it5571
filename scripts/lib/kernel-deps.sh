@@ -5,11 +5,12 @@
 # Supported: Debian / Ubuntu (regular kernel), Proxmox VE (pve kernel),
 # Fedora / RHEL family. Anything else is rejected by os_family().
 #
-# detect_kernel_headers [exact]  -- "exact" skips the distro meta packages
-#   (linux-headers-amd64/-generic, kernel-devel, pve-headers fallback), keeping
-#   only the package for the current kernel. Used for --test/--persistent where
-#   headers are only needed for this one build. The default (meta included) is
-#   for --dkms, which must survive kernel updates.
+# detect_kernel_headers [exact]  -- pick the header packages to install.
+#   Default: headers for the running kernel PLUS the distro's generic header
+#   package (linux-headers-amd64/-generic, kernel-devel), which follows future
+#   kernel updates -- needed so DKMS can rebuild after upgrades. "exact" keeps
+#   only the running kernel's headers, enough for a one-off --test/--persistent
+#   build. Exports KERNFAM, PKG_MGR, BUILD_PKGS and HEADER_PKGS.
 #
 # ensure_build_deps [exact]       -- installs only what is missing and records
 #   the packages in INSTALLED_DEPS so cleanup_installed_deps() can remove them
@@ -31,6 +32,8 @@ MODULES_DIR="${MODULES_DIR:-/lib/modules}"
 # remove them again afterwards with cleanup_installed_deps).
 INSTALLED_DEPS=()
 
+# install.sh defines its own die/have because it needs them before this file is
+# sourced; the copies are identical and both are needed.
 die()   { echo "error: $*" >&2; exit 1; }
 have()  { command -v "$1" >/dev/null 2>&1; }
 warning() { echo "warning: $*" >&2; }
@@ -80,7 +83,7 @@ detect_kernel_headers() {
       if [ "$want_exact" -eq 1 ]; then
         HEADER_PKGS="pve-headers-${UNAME_R}"
         apt_resolvable "pve-headers-${UNAME_R}" || {
-          warning "pve-headers-${UNAME_R} not available; falling back to the pve-headers meta package"
+          warning "pve-headers-${UNAME_R} not available; falling back to the generic pve-headers package"
           HEADER_PKGS="pve-headers"
         }
       else
@@ -121,9 +124,9 @@ detect_kernel_headers() {
         || die "custom or unsupported kernel: no package kernel-devel-${UNAME_R} -- install matching kernel-devel manually or use a distro kernel"
       if [ "$want_exact" -eq 0 ]; then
         if dnf_resolvable kernel-devel; then
-          HEADER_PKGS="${HEADER_PKGS} kernel-devel"   # meta: tracks future kernel updates
+          HEADER_PKGS="${HEADER_PKGS} kernel-devel"   # generic: follows future kernel updates
         else
-          warning "kernel-devel meta not available; rerun after kernel upgrades"
+          warning "generic kernel-devel package not available; rerun after kernel upgrades"
         fi
       fi
       ;;
@@ -193,6 +196,8 @@ cleanup_installed_deps() {
 }
 
 ensure_dkms() {
+  # No "exact" here: DKMS must be able to rebuild after a kernel upgrade, so it
+  # needs the distro's generic header package too.
   ensure_build_deps
   have dkms && return 0
 
