@@ -5,9 +5,6 @@
 # Supported: Debian / Ubuntu (regular kernel), Proxmox VE (pve kernel),
 # Fedora / RHEL family. Anything else is rejected by os_family().
 #
-# driver_version FILE                  -- prints the version declared by the
-#   MODULE_VERSION string in the driver source.
-#
 # detect_kernel_headers [exact]  -- running-kernel headers only with "exact",
 #   otherwise also the distro's generic package so DKMS can rebuild after
 #   kernel updates. Exports KERNFAM, PKG_MGR, BUILD_PKGS, HEADER_PKGS.
@@ -21,27 +18,16 @@
 #   UNAME_R          kernel release to pretend      (default: $(uname -r))
 #   MODULES_DIR      module dir to check            (default: /lib/modules)
 
+. "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
 OS_RELEASE_FILE="${OS_RELEASE_FILE:-/etc/os-release}"
 UNAME_R="${UNAME_R:-$(uname -r)}"
 MODULES_DIR="${MODULES_DIR:-/lib/modules}"
 
 INSTALLED_DEPS=()
 
-die()   { echo "error: $*" >&2; exit 1; }
-have()  { command -v "$1" >/dev/null 2>&1; }
-warning() { echo "warning: $*" >&2; }
-
 apt_resolvable()  { apt-cache show "$1" >/dev/null 2>&1; }
 dnf_resolvable()  { dnf list --available "$1" >/dev/null 2>&1; }
-
-driver_version() {
-  local v
-  v="$(sed -n 's/.*MODULE_VERSION[[:space:]]*([[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -1)"
-  # sed exits 0 even when nothing matched, so an empty result means the source
-  # is missing or the line was reformatted -- never treat that as a version.
-  [ -n "$v" ] || die "cannot read MODULE_VERSION from ${1}"
-  echo "$v"
-}
 
 os_family() {
   case "$UNAME_R" in

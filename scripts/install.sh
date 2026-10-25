@@ -7,11 +7,11 @@
 #
 set -euo pipefail
 
+. "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
 # ============================================================================
 #  CONFIG
 # ============================================================================
-
-MODULE="minisforum_n5_it5571"
 
 KVER="$(uname -r)"
 ARCH="$(uname -m)"
@@ -24,15 +24,12 @@ TMP_DIR=""
 #  Small helpers
 # ============================================================================
 
-die()   { echo "error: $*" >&2; exit 1; }
-need_root() { [ "$(id -u)" -eq 0 ] || die "run as root (sudo $0 ...)"; }
-
 usage() {
   cat <<'EOF'
 Minisforum N5 (IT5571) driver installer (Debian/Ubuntu, Proxmox VE, Fedora/RHEL)
 
 Usage:
-  install.sh [--test | --persistent | --dkms | --uninstall | --help] [--enable-write]
+  install.sh [--test | --persistent | --dkms | --uninstall | --help | -h] [--enable-write]
 
 Modes:
   (default) --test
@@ -55,15 +52,16 @@ Modes:
         and undoes it: unloads, removes the .ko, depmod, deletes the
         modprobe/load config files and the /usr/src DKMS tree.
 
-  --help
+  --help, -h
         Show this help.
 
 Flags:
   --enable-write
         Load the module with enable_write=1 (PWM control enabled).
         The default is READ-ONLY sensors, no PWM writes -- enable this
-        only to experiment once the readings look right. Accepted in any
-        position relative to the mode flag, e.g.:
+        only to experiment once the readings look right. Applies to
+        --test, --persistent and --dkms (ignored by --uninstall).
+        Accepted in any position relative to the mode flag, e.g.:
           install.sh --dkms --enable-write
           install.sh --enable-write
           install.sh --test --enable-write
@@ -113,9 +111,8 @@ prepare_source() {
 
 setup_build_tree() {
   # Build in a private copy so compiled files never land in the checkout.
-  mkdir -p "$TMP_DIR"
-  cp -r "$1/driver-prototype" "$TMP_DIR/driver-prototype"
-  make -C "/lib/modules/${KVER}/build" M="$TMP_DIR/driver-prototype" clean >/dev/null 2>&1 || true
+  mkdir -p "$TMP_DIR/driver-prototype"
+  cp "$1/driver-prototype/${MODULE}.c" "$1/driver-prototype/Makefile" "$TMP_DIR/driver-prototype/"
 }
 
 build_module() {
@@ -165,11 +162,11 @@ cmd_persistent() {
   [ "$actual" = "$wanted" ] || die "modprobe ${MODULE} resolves to ${actual}, not the freshly built ${wanted} -- a DKMS/distro install shadows it (run: install.sh --uninstall, or use --dkms)"
 
   if [ "$ENABLE_WRITE" -eq 1 ]; then
-    echo "options ${MODULE} enable_write=1" > /etc/modprobe.d/minisforum-n5.conf
+    echo "options ${MODULE} enable_write=1" > "$MODPROBE_CONF"
   else
-    rm -f /etc/modprobe.d/minisforum-n5.conf
+    rm -f "$MODPROBE_CONF"
   fi
-  echo "$MODULE" > /etc/modules-load.d/minisforum-n5.conf
+  echo "$MODULE" > "$MODULES_LOAD_CONF"
 
   modprobe "$MODULE" || die "load failed -- verify with: dmesg | grep ${MODULE}"
 
@@ -197,9 +194,9 @@ main() {
   ENABLE_WRITE=0
   for arg in "$@"; do
     case "$arg" in
-      --test|test)          action="test" ;;
-      --persistent|persistent) action="persistent" ;;
-      --dkms|dkms)          action="dkms" ;;
+      --test)               action="test" ;;
+      --persistent)         action="persistent" ;;
+      --dkms)               action="dkms" ;;
       --uninstall)          action="uninstall" ;;
       --help|-h)            usage; exit 0 ;;
       --enable-write)       ENABLE_WRITE=1 ;;
@@ -235,13 +232,13 @@ main() {
 
   . "$SRCDIR/scripts/lib/kernel-deps.sh"
 
-  TMP_DIR="$(mktemp -d)"
-  setup_build_tree "$SRCDIR"
-
   case "$action" in
-    test)        cmd_test ;;
-    persistent)  cmd_persistent ;;
-    dkms)        cmd_dkms "$SRCDIR" ;;
+    test|persistent)
+      TMP_DIR="$(mktemp -d)"
+      setup_build_tree "$SRCDIR"
+      "cmd_${action}"
+      ;;
+    dkms)  cmd_dkms "$SRCDIR" ;;
   esac
 }
 

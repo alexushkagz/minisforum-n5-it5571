@@ -17,9 +17,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-. "$REPO_ROOT/scripts/lib/kernel-deps.sh"
-
-die() { echo "error: $*" >&2; exit 1; }
+. "$REPO_ROOT/scripts/lib/common.sh"
 
 TAG=""
 REF=""

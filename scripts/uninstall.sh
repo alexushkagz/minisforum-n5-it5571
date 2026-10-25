@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Minisforum N5 IT5571 — uninstaller
 #
 # Run as root: sudo ./scripts/uninstall.sh      (no arguments)
@@ -11,22 +11,13 @@
 
 set -euo pipefail
 
-DRIVER_NAME="minisforum-n5-it5571"
-MODULE="minisforum_n5_it5571"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
 KVER="$(uname -r)"
 
-warning() { echo "warning: $*" >&2; }
-have() { command -v "$1" >/dev/null 2>&1; }
+[ $# -eq 0 ] || die "unexpected argument: $1 (this script takes no arguments)"
 
-if [ $# -gt 0 ]; then
-    echo "error: unexpected argument: $1 (this script takes no arguments)" >&2
-    exit 1
-fi
-
-if [[ $EUID -ne 0 ]]; then
-    echo "Run as root: sudo $0"
-    exit 1
-fi
+need_root
 
 # A module in use stays loaded; warn and continue so the rest still runs.
 status_msg="module was not loaded"
@@ -85,7 +76,7 @@ done
 
 echo "Removing module files and config..."
 rm -f "/lib/modules/${KVER}/extra/${MODULE}.ko"
-rm -f /etc/modprobe.d/minisforum-n5.conf /etc/modules-load.d/minisforum-n5.conf
+rm -f "$MODPROBE_CONF" "$MODULES_LOAD_CONF"
 depmod -a
 
 echo ""

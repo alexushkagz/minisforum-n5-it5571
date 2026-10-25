@@ -37,6 +37,11 @@ case "$VERSION" in
   "" | *"<REPLACE"*)  die "VERSION ${UNCONFIGURED}" ;;
 esac
 
+for tool in curl tar sha256sum gzip; do
+  command -v "$tool" >/dev/null 2>&1 \
+    || die "required tool missing: ${tool} -- install it with your package manager"
+done
+
 TARBALL="minisforum-n5-it5571-${VERSION}.tar.gz"
 URL="https://github.com/${GH_USER}/${GH_REPO}/releases/download/v${VERSION}/${TARBALL}"
 
@@ -66,6 +71,7 @@ driver-prototype/Makefile
 scripts/install.sh
 scripts/setup-dkms.sh
 scripts/uninstall.sh
+scripts/lib/common.sh
 scripts/lib/kernel-deps.sh
 "
 

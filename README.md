@@ -43,8 +43,8 @@ Proxmox parts their own place:
   release. `get.sh` is the download entrypoint: it fetches a release, verifies
   its checksum and hands over to `install.sh`. `setup-dkms.sh` and
   `uninstall.sh` are the DKMS installer and the standalone uninstaller, both
-  runnable directly. `lib/kernel-deps.sh` holds the shared distro/kernel-header
-  logic, and `release.sh` builds the release artifacts (see
+  runnable directly. `lib/common.sh` holds the shared helpers and constants,
+  `lib/kernel-deps.sh` the distro/kernel-header logic, and `release.sh` builds the release artifacts (see
   [Releasing](#releasing)).
 - **`unraid-legacy/`** — everything Unraid-only from the original repository,
   moved here unchanged for reference: the plugin file, the WebGUI sources, the
@@ -110,8 +110,10 @@ Modes:
   a kernel update brings new headers. Build dependencies (incl. the header
   meta-package) and dkms are installed once and **kept**.
 - `--uninstall` — detect what is installed and undo it.
+- `--help`, `-h` — show usage.
 
-`--enable-write` applies to `--test`, `--persistent` and `--dkms`.
+`--enable-write` applies to `--test`, `--persistent` and `--dkms` (ignored by
+`--uninstall`).
 
 The helper scripts can also be run directly. `setup-dkms.sh` performs a DKMS
 install. `uninstall.sh` is the full uninstaller: it takes no arguments and
