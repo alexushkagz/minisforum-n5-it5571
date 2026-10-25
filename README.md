@@ -35,7 +35,8 @@ Keeping the original structure made it easy to track upstream while giving the
 Proxmox parts their own place:
 
 - **`driver-prototype/`** — the driver itself: `minisforum_n5_it5571.c` and the
-  kernel module `Makefile`. The path mirrors the upstream repo exactly, so the
+  kernel module `Makefile` (see its [README](driver-prototype/README.md) for
+  manual build and load). The path mirrors the upstream repo exactly, so the
   driver can be merged forward cleanly as the original project evolves.
 - **`scripts/`** — `install.sh` builds and installs the driver from the sources
   next to it, so it runs either from a clone or from inside an unpacked
@@ -62,9 +63,9 @@ System, Board and Ambient.
 
 Each PWM channel can be switched between the EC's automatic curve and manual
 control, and the driver restores the automatic mode for the channels it
-actually touched when it is unloaded. On hardware like ours, where upstream had
-not yet validated the DMI pair, the module starts in read-only mode: PWM
-writes are only enabled after you deliberately pass `experimental_write=1`
+actually touched when it is unloaded. The module is read-only by default on
+every supported board: PWM writes are only enabled after you deliberately load
+it with `enable_write=1` (which is what the installer's `--enable-write` does)
 once the sensor readings look right.
 
 ## Installing
@@ -109,6 +110,8 @@ Modes:
   a kernel update brings new headers. Build dependencies (incl. the header
   meta-package) and dkms are installed once and **kept**.
 - `--uninstall` — detect what is installed and undo it.
+
+`--enable-write` applies to `--test`, `--persistent` and `--dkms`.
 
 The helper scripts can also be run directly. `setup-dkms.sh` performs a DKMS
 install. `uninstall.sh` is the full uninstaller: it takes no arguments and
@@ -212,9 +215,11 @@ context of the original project is still here:
 
 This is an independent community effort, not affiliated with or endorsed by
 Minisforum or ITE. The driver contains unverified factors and is provided
-"as is"; you use it at your own risk. Upstream has fully validated only the
-`N5/F8NAA` profile — the `N5 PRO / F8NAB` support added here is experimental
-until the validation checklist has been completed. The full terms are in the
+"as is"; you use it at your own risk. Upstream validated PWM control only on
+`N5/F8NAA`. The `N5 PRO / F8NAB` support added here was tested on one machine
+(sensors and PWM, but not the PCIe fan channel); other profiles are untested.
+See the table in [`driver-prototype/README.md`](driver-prototype/README.md#supported-boards).
+The full terms are in the
 [original DISCLAIMER](unraid-legacy/DISCLAIMER.md).
 
 ## License

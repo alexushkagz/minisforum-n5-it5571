@@ -3,7 +3,7 @@
 #
 # Run as root: sudo ./setup-dkms.sh [--enable-write] [VERSION]
 #
-#   --enable-write   Load with experimental_write=1 (PWM control enabled).
+#   --enable-write   Load with enable_write=1 (PWM control enabled).
 #                    Default: read-only sensors, no PWM writes.
 #
 #   VERSION          optional DKMS package version. Defaults to the version
@@ -77,9 +77,9 @@ echo "Installing module..."
 dkms install -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
 
 if [ "$ENABLE_WRITE" -eq 1 ]; then
-    echo "Loading module with experimental_write=1 (PWM enabled)..."
-    modprobe minisforum_n5_it5571 experimental_write=1
-    echo "options minisforum_n5_it5571 experimental_write=1" > /etc/modprobe.d/minisforum-n5.conf
+    echo "Loading module with enable_write=1 (PWM enabled)..."
+    modprobe minisforum_n5_it5571 enable_write=1
+    echo "options minisforum_n5_it5571 enable_write=1" > /etc/modprobe.d/minisforum-n5.conf
 else
     echo "Loading module (read-only sensors, no PWM writes)..."
     modprobe minisforum_n5_it5571

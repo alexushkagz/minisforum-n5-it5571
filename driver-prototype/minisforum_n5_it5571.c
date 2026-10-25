@@ -52,14 +52,12 @@ static bool force;
 module_param(force, bool, 0444);
 MODULE_PARM_DESC(force, "Load read-only without a known Minisforum DMI match");
 
-static bool experimental_write;
-module_param(experimental_write, bool, 0444);
-MODULE_PARM_DESC(experimental_write,
-		 "Enable PWM writes on experimental or force-loaded systems");
+static bool enable_write;
+module_param(enable_write, bool, 0444);
+MODULE_PARM_DESC(enable_write, "Enable PWM writes (default: read-only sensors)");
 
 struct n5_board_profile {
 	const char *name;
-	bool validated;
 };
 
 struct n5_data {
@@ -298,7 +296,7 @@ static umode_t n5_is_visible(const void *drvdata,
 			return 0;
 		}
 	case hwmon_pwm:
-		/* Experimental systems start in read-only sensor mode. */
+		/* Read-only unless enable_write=1. */
 		if (!data->write_enabled)
 			return 0;
 		switch (attr) {
@@ -485,22 +483,18 @@ static const struct hwmon_chip_info n5_chip_info = {
 
 static struct n5_board_profile n5_f8naa = {
 	.name = "Minisforum N5 / F8NAA",
-	.validated = true,
 };
 
 static struct n5_board_profile n5_pro_f8naa = {
 	.name = "Minisforum N5 Pro / F8NAA",
-	.validated = false,
 };
 
 static struct n5_board_profile n5_pro_f8nab = {
 	.name = "Minisforum N5 Pro / F8NAB",
-	.validated = false,
 };
 
 static struct n5_board_profile n5_air_f8nab = {
 	.name = "Minisforum N5 Air / F8NAB",
-	.validated = false,
 };
 
 static const struct dmi_system_id n5_dmi_table[] = {
@@ -595,9 +589,7 @@ static int n5_probe(struct platform_device *pdev)
 	}
 
 	mutex_init(&data->lock);
-	data->write_enabled = profile && profile->validated;
-	if (!data->write_enabled && experimental_write)
-		data->write_enabled = true;
+	data->write_enabled = enable_write;
 	for (i = 0; i < N5_PWM_CHANNELS; i++) {
 		data->pwm[i] = 255;
 		data->pwm_enable[i] = 2;
@@ -614,18 +606,14 @@ static int n5_probe(struct platform_device *pdev)
 		return PTR_ERR(data->hwmon_dev);
 	}
 
-	if (profile && profile->validated) {
-		dev_info(&pdev->dev, "%s: validated profile; PWM writes enabled\n",
-			 profile->name);
-	} else if (data->write_enabled) {
+	if (data->write_enabled)
 		dev_warn(&pdev->dev,
-			 "%s: EXPERIMENTAL PWM WRITES ENABLED; stop immediately if a fan stops, runs unexpectedly, a channel is mismatched, or temperatures become abnormal\n",
+			 "%s: PWM WRITES ENABLED; stop immediately if a fan stops, runs unexpectedly, a channel is mismatched, or temperatures become abnormal\n",
 			 profile ? profile->name : "force-loaded unknown system");
-	} else {
-		dev_warn(&pdev->dev,
-			 "%s: experimental read-only mode; PWM nodes hidden (set experimental_write=1 only after checking temperature and RPM data)\n",
+	else
+		dev_info(&pdev->dev,
+			 "%s: read-only mode; PWM nodes hidden (load with enable_write=1 to enable PWM control)\n",
 			 profile ? profile->name : "force-loaded unknown system");
-	}
 	dev_info(&pdev->dev,
 		 "registered 4 fan and 4 temperature channels%s\n",
 		 data->write_enabled ? " plus 4 writable PWM channels" : "");

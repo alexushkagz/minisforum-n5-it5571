@@ -60,7 +60,7 @@ Modes:
 
 Flags:
   --enable-write
-        Load the module with experimental_write=1 (PWM control enabled).
+        Load the module with enable_write=1 (PWM control enabled).
         The default is READ-ONLY sensors, no PWM writes -- enable this
         only to experiment once the readings look right. Accepted in any
         position relative to the mode flag, e.g.:
@@ -134,9 +134,9 @@ cmd_test() {
   local ko
   ko="$(build_module)"
   if [ "$ENABLE_WRITE" -eq 1 ]; then
-    insmod "$ko" experimental_write=1 \
+    insmod "$ko" enable_write=1 \
       || die "insmod failed -- check dmesg (unsupported DMI? wrong kernel?)"
-    echo "module loaded for testing (experimental_write=1, PWM control enabled)."
+    echo "module loaded for testing (enable_write=1, PWM control enabled)."
   else
     insmod "$ko" || die "insmod failed -- check dmesg (unsupported DMI? wrong kernel?)"
     echo "module loaded for testing (read-only sensors, no PWM writes)."
@@ -165,7 +165,7 @@ cmd_persistent() {
   [ "$actual" = "$wanted" ] || die "modprobe ${MODULE} resolves to ${actual}, not the freshly built ${wanted} -- a DKMS/distro install shadows it (run: install.sh --uninstall, or use --dkms)"
 
   if [ "$ENABLE_WRITE" -eq 1 ]; then
-    echo "options ${MODULE} experimental_write=1" > /etc/modprobe.d/minisforum-n5.conf
+    echo "options ${MODULE} enable_write=1" > /etc/modprobe.d/minisforum-n5.conf
   else
     rm -f /etc/modprobe.d/minisforum-n5.conf
   fi
