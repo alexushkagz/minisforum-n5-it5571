@@ -73,7 +73,7 @@ once the sensor readings look right.
 The installer detects your distro and running kernel, installs any missing
 build dependencies (compiler + matching kernel headers) automatically, and
 supports Debian/Ubuntu with a stock kernel, Proxmox VE (`-pve` kernel), and the
-Fedora/RHEL family (Fedora 8+).
+Fedora/RHEL family (Fedora, RHEL 8+ with `dnf`).
 
 **One-liner** — `get.sh` downloads the release archive, verifies its SHA-256,
 and hands over to the installer:
@@ -100,12 +100,13 @@ these commands.
 Modes:
 - `--test` (default) — build and load into the running kernel; read-only
   sensors unless `--enable-write`. Nothing persisted; a reboot returns to BIOS
-  control. Temporary build dependencies (toolchain + this kernel's headers)
-  are auto-installed if missing and removed again when the script finishes.
+  control. Missing build dependencies (toolchain + this kernel's headers)
+  are installed, and exactly those packages are removed again when the script
+  finishes.
 - `--persistent` — install into `/lib/modules/<kernel>/extra` and load on boot
   via modprobe. Kernel-specific: **rerun it after every kernel update** (or
-  prefer `--dkms` so this happens automatically). Temporary build dependencies
-  are auto-installed if missing and removed again when the script finishes.
+  prefer `--dkms` so this happens automatically). Missing build dependencies
+  are installed and exactly those packages are removed again afterwards.
 - `--dkms` — register with DKMS. The module is rebuilt automatically whenever
   a kernel update brings new headers. Build dependencies (incl. the header
   meta-package) and dkms are installed once and **kept**.
@@ -127,27 +128,34 @@ sudo ./scripts/uninstall.sh
 
 ### Dependencies and kernel headers
 
-Build dependencies are installed automatically. `--test` and `--persistent`
-install the headers for the running kernel and remove them again when the run
-finishes; `--dkms` also installs the distro's generic header package so DKMS can
-rebuild after kernel upgrades:
+Build dependencies are installed automatically, and only what is missing.
+`--test` and `--persistent` need the compiler and the headers for the running
+kernel; they remove exactly the packages they installed when the run finishes
+(no `autoremove`). `--dkms` additionally installs the distro's header
+metapackage (so DKMS can rebuild after kernel updates) and `dkms`, and keeps
+everything.
 
-| Platform         | Installed by the scripts                                                     |
-| ---------------- | ---------------------------------------------------------------------------- |
-| Debian           | `build-essential`, `linux-headers-$(uname -r)`, `linux-headers-amd64`        |
-| Ubuntu           | `build-essential`, `linux-headers-$(uname -r)`, `linux-headers-generic`      |
-| Proxmox VE       | `build-essential`, `pve-headers` (meta — tracks every kernel update)         |
-| Fedora/RHEL      | `gcc`, `make`, `kernel-devel-$(uname -r)`, `kernel-devel`                    |
+| Platform         | Headers for the running kernel                          | Metapackage (`--dkms`)                              | Compiler             |
+| ---------------- | ------------------------------------------------------- | --------------------------------------------------- | -------------------- |
+| Proxmox VE       | `proxmox-headers-<kver>`, else `pve-headers-<kver>`     | `proxmox-default-headers`, else `pve-headers`       | `build-essential`    |
+| Debian           | `linux-headers-<kver>`                                  | `linux-headers-amd64` (`-amd64` kernels only)       | `build-essential`    |
+| Ubuntu           | `linux-headers-<kver>`                                  | `linux-headers-generic` (`-generic` kernels only)   | `build-essential`    |
+| Fedora/RHEL 8+   | `kernel-devel-<kver>`                                   | `kernel-devel-matched`, else `kernel-devel`         | `gcc`, `make`        |
 
 Notes:
-- On Ubuntu **HWE** kernels `linux-headers-generic` may not exist; a warning is
-  printed and the usual `linux-headers-generic-hwe-<release>` advice applies.
-- A Debian/Fedora box running a **custom kernel** with no matching headers
-  package is refused with a clear error rather than half-installed.
+- On Ubuntu **HWE**, cloud and other non-`-generic` kernels (and Debian kernels
+  not ending in `-amd64`) the header metapackage is not installed
+  automatically; a warning is printed. Install matching headers yourself so
+  DKMS can rebuild after kernel updates.
+- Headers already present in `/lib/modules/<kver>/build` are used as is, even
+  from a custom kernel. Without them, a custom kernel with no matching headers
+  package is refused with a clear error.
+- If a newer kernel was installed but not booted, headers for the *running*
+  kernel may be unavailable: reboot into the newest kernel or install them
+  manually.
 - **SecureBoot**-enforced hosts refuse unsigned out-of-tree modules; disable
   SecureBoot (or sign the module) for the driver to load. Not handled by the
   scripts.
-- RHEL 7 and older (`yum`) are out of scope; Fedora / RHEL 8+ use `dnf`.
 
 Two more things worth knowing: the compiled module is tied to the exact kernel
 it was built for, so always build on the target machine rather than copying

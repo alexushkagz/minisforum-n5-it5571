@@ -44,8 +44,8 @@ Modes:
 
   --dkms
         Full DKMS install. The module is rebuilt automatically on every
-        kernel update. Missing build dependencies and dkms itself are
-        installed automatically for your distro.
+        kernel update. Missing build dependencies, the header metapackage
+        and dkms itself are installed automatically and kept.
 
   --uninstall
         Detects how the module is installed (insmod / persistent / DKMS)
@@ -71,15 +71,14 @@ Notes:
   - The compiled .ko only works on the exact kernel it was built for.
   - Build dependencies (compiler + kernel headers) are resolved and
     installed automatically on Debian/Ubuntu, Proxmox VE, Fedora/RHEL.
-    --test and --persistent remove what they installed when the script
-    finishes (success or failure); --dkms keeps it.
+    --test and --persistent install only what is missing and remove exactly
+    those packages when the script finishes (success or failure); no
+    autoremove is run. --dkms keeps what it installed.
 EOF
 }
 
 check_build_deps() {
-  # --test/--persistent only need headers for the running kernel, so "exact"
-  # skips the distro's generic header packages (those matter only for future
-  # DKMS rebuilds). Anything installed here is removed again on exit.
+  # Anything installed here is removed again on exit.
   ensure_build_deps exact
 }
 

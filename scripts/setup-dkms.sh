@@ -61,7 +61,10 @@ AUTOINSTALL="yes"
 EOF
 
 echo "Registering with DKMS..."
-dkms remove -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}" --all 2>/dev/null || true
+if dkms_registered_versions | grep -qxF "${DRIVER_VERSION}"; then
+    dkms remove -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}" --all \
+        || die "could not remove the existing DKMS registration of ${DRIVER_NAME} ${DRIVER_VERSION} (unload the module and retry)"
+fi
 dkms add -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
 
 echo "Building module for kernel $(uname -r)..."

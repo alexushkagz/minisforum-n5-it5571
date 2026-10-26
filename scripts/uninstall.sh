@@ -31,10 +31,9 @@ if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
     fi
 fi
 
-# Parse both DKMS status formats: "name, version, ..." (dkms < v3.0) and "name/version, ...".
 failed_versions=()
 if have dkms; then
-    versions="$(dkms status 2>/dev/null | sed -n "s/^${DRIVER_NAME}[/,][[:space:]]*\([0-9][0-9.]*\).*/\1/p" | sort -u || true)"
+    versions="$(dkms_registered_versions)"
 
     if [ -n "$versions" ]; then
         removed=0
@@ -94,4 +93,14 @@ if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
     echo "  ${MODULE} is still loaded (it was in use)"
 else
     echo "  (not loaded - OK)"
+fi
+
+echo ""
+echo "note: dkms and build tools installed by --dkms (or by you) are not touched."
+if have dkms && [ -z "$(dkms status 2>/dev/null)" ]; then
+    if have apt-get; then
+        echo "dkms is not used by any module; remove it with: apt-get remove --purge dkms"
+    elif have dnf; then
+        echo "dkms is not used by any module; remove it with: dnf remove dkms"
+    fi
 fi
