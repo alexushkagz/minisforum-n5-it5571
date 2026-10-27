@@ -29,33 +29,6 @@ so the probe aborted with an `-ENODEV: unsupported system`. That combination
 now has its own board profile in
 [`driver-prototype/minisforum_n5_it5571.c`](driver-prototype/minisforum_n5_it5571.c).
 
-## Repository layout
-
-Keeping the original structure made it easy to track upstream while giving the
-Proxmox parts their own place:
-
-- **`driver-prototype/`** — the driver itself: `minisforum_n5_it5571.c` and the
-  kernel module `Makefile` (see its [README](driver-prototype/README.md) for
-  manual build and load). The path mirrors the upstream repo exactly, so the
-  driver can be merged forward cleanly as the original project evolves.
-- **`scripts/`** — the installer and its helpers:
-  - `install.sh` builds and installs the driver from the sources next to it, so
-    it runs either from a clone or from inside an unpacked release.
-  - `get.sh` is the download entrypoint: it fetches a release, verifies its
-    checksum and hands over to `install.sh`.
-  - `setup-dkms.sh` and `uninstall.sh` are the DKMS installer and the
-    standalone uninstaller, both runnable directly.
-  - `lib/common.sh` holds the shared helpers and constants; `lib/kernel-deps.sh`
-    the distro/kernel-header logic.
-  - `release.sh` builds the release artifacts (see [Releasing](#releasing)).
-- **`unraid-legacy/`** — everything Unraid-only from the original repository,
-  moved here unchanged for reference: the plugin file, the WebGUI sources, the
-  `.txz` and kernel build scripts, the reverse-engineering tools, the
-  screenshots, and all the original documentation. Nothing in this folder is
-  needed to run the driver.
-- **`LICENSE` / `LICENSES/`** — the GPL-2.0 material covering the driver
-  source.
-
 ## What the driver does
 
 Loaded, the module registers an `hwmon` device with four fan channels — CPU,
@@ -70,12 +43,15 @@ every supported board: PWM writes are only enabled after you deliberately load
 it with `enable_write=1` (which is what the installer's `--enable-write` does)
 once the sensor readings look right.
 
+Once the module is up, standard tools like `pwmconfig`/`fancontrol` or
+[CoolerControl](https://github.com/CoolerControl/CoolerControl) can do the
+fan-speed curves for you.
+
 ## Installing
 
-The installer detects your distro and running kernel, installs any missing
-build dependencies (compiler + matching kernel headers) automatically, and
-supports Debian/Ubuntu with a stock kernel, Proxmox VE (`-pve` kernel), and the
-Fedora/RHEL family (Fedora, RHEL 8+ with `dnf`).
+Works on Debian/Ubuntu (stock kernel), Proxmox VE (`-pve` kernel) and
+Fedora/RHEL 8+ (`dnf`). The installer detects your distro and kernel and
+installs any missing build dependencies automatically.
 
 **One-liner** — `get.sh` downloads the release archive, verifies its SHA-256,
 and hands over to the installer:
@@ -100,48 +76,37 @@ On Proxmox VE you usually work as `root` already, so drop `sudo` from any of
 these commands.
 
 Modes:
-- `--test` (default) — build and load into the running kernel; read-only
-  sensors unless `--enable-write`. Nothing persisted; a reboot returns to BIOS
-  control. Missing build dependencies (toolchain + this kernel's headers)
-  are installed, and exactly those packages are removed again when the script
-  finishes. An already-loaded copy is unloaded first.
-- `--persistent` — install into `/lib/modules/<kernel>/extra` and load on boot
-  via modprobe. Kernel-specific: **rerun it after every kernel update** (or
-  prefer `--dkms` so this happens automatically). Missing build dependencies
-  are installed and exactly those packages are removed again afterwards.
-  An already-loaded copy is unloaded first, so rerunning with `--enable-write`
-  reloads the module with the new setting.
-- `--dkms` — register with DKMS. The module is rebuilt automatically whenever
-  a kernel update brings new headers. Build dependencies (incl. the header
-  meta-package) and dkms are installed once and **kept**. A loaded copy is
-  unloaded first.
-- `--uninstall` — detect what is installed and undo it. Only the running
-  kernel's `.ko` is removed; copies left for other kernels are listed.
+- `--test` (default) — build and load into the running kernel. Nothing is
+  persisted; a reboot returns to BIOS control.
+- `--persistent` — install into `/lib/modules/<kernel>/extra` and load on boot.
+  Kernel-specific: **rerun it after every kernel update**, or use `--dkms`.
+- `--dkms` — register with DKMS, so the module is rebuilt automatically on
+  every kernel update.
+- `--uninstall` — detect what is installed and undo it. Copies left for other
+  kernels are listed, not removed.
 - `--help`, `-h` — show usage.
 
-`--enable-write` applies to `--test`, `--persistent` and `--dkms` (ignored by
-`--uninstall`).
+Flag:
+- `--enable-write` — load with PWM writes enabled (read-only otherwise).
+  Applies to `--test`, `--persistent` and `--dkms`.
 
-The helper scripts can also be run directly. `setup-dkms.sh` performs a DKMS
-install. `uninstall.sh` is the full uninstaller: it takes no arguments and
-undoes `--dkms`, `--persistent` and `--test` installs alike, removing every
-registered DKMS version. It is what `install.sh --uninstall` calls. If
-`dkms status` fails, it keeps the `/usr/src` trees and prints the manual
-cleanup commands.
+All modes unload an already-loaded copy first, so rerunning with
+`--enable-write` reloads the module with the new setting.
 
-```bash
-sudo ./scripts/setup-dkms.sh --enable-write
-sudo ./scripts/uninstall.sh
-```
+The compiled module only works on the exact kernel it was built for,
+so build on the target machine instead of copying .ko files between systems.
+
+`setup-dkms.sh` and `uninstall.sh` can also be run directly. `uninstall.sh`
+takes no arguments and removes every install mode, including all registered
+DKMS versions; it is what `install.sh --uninstall` calls.
 
 ### Dependencies and kernel headers
 
-Build dependencies are installed automatically, and only what is missing.
-`--test` and `--persistent` need the compiler and the headers for the running
-kernel; they remove exactly the packages they installed when the run finishes
-(no `autoremove`). `--dkms` additionally installs the distro's header
-metapackage (so DKMS can rebuild after kernel updates) and `dkms`, and keeps
-everything.
+Only what is missing is installed. `--test` and `--persistent` need the
+compiler and the headers for the running kernel, and remove exactly the
+packages they installed when they finish (no `autoremove`). `--dkms` also
+installs the distro's header metapackage and `dkms`, and keeps everything, so
+DKMS can rebuild after kernel updates.
 
 | Platform         | Headers for the running kernel                          | Metapackage (`--dkms`)                              | Compiler             |
 | ---------------- | ------------------------------------------------------- | --------------------------------------------------- | -------------------- |
@@ -152,24 +117,37 @@ everything.
 
 Notes:
 - On Ubuntu **HWE**, cloud and other non-`-generic` kernels (and Debian kernels
-  not ending in `-amd64`) the header metapackage is not installed
-  automatically; a warning is printed. Install matching headers yourself so
-  DKMS can rebuild after kernel updates.
+  not ending in `-amd64`) the metapackage is not installed automatically and a
+  warning is printed. Install matching headers yourself so DKMS can rebuild.
 - Headers already present in `/lib/modules/<kver>/build` are used as is, even
-  from a custom kernel. Without them, a custom kernel with no matching headers
-  package is refused with a clear error.
-- If a newer kernel was installed but not booted, headers for the *running*
-  kernel may be unavailable: reboot into the newest kernel or install them
-  manually.
+  from a custom kernel.
 - **SecureBoot**-enforced hosts refuse unsigned out-of-tree modules; disable
   SecureBoot (or sign the module) for the driver to load. Not handled by the
   scripts.
 
-Two more things worth knowing: the compiled module is tied to the exact kernel
-it was built for, so always build on the target machine rather than copying
-`.ko` files between systems. And once the module is up, standard tools like
-`pwmconfig`/`fancontrol` or [CoolerControl](https://github.com/CoolerControl/CoolerControl)
-can do the fan-speed curves for you.
+## Repository layout
+
+Keeping the original structure made it easy to track upstream while giving the
+Proxmox parts their own place:
+
+- **`driver-prototype/`** — the driver itself: `minisforum_n5_it5571.c` and the
+  kernel module `Makefile` (see its [README](driver-prototype/README.md) for
+  manual build and load). The path mirrors the upstream repo exactly, so the
+  driver can be merged forward cleanly as the original project evolves.
+- **`scripts/`** — the installer and its helpers:
+  - `install.sh` builds and installs the driver from the sources next to it, so
+    it runs either from a clone or from inside an unpacked release.
+  - `get.sh` is the download entrypoint: it fetches a release, verifies its
+    checksum and hands over to `install.sh`.
+  - `setup-dkms.sh` and `uninstall.sh` are the DKMS installer and the
+    standalone uninstaller.
+  - `lib/` holds internal helpers: shared functions and constants, and the
+    distro/kernel-header logic.
+  - `release.sh` builds the release artifacts (see [Releasing](#releasing)).
+- **`unraid-legacy/`** — everything Unraid-only from the original repository,
+  kept unchanged for reference. Nothing in it is needed to run the driver.
+- **`LICENSE` / `LICENSES/`** — the GPL-2.0 material covering the driver
+  source.
 
 ## Releasing
 
@@ -188,47 +166,9 @@ dist/get.sh                                       the entrypoint, with the
                                                   version and checksum filled in
 ```
 
-```bash
-# 1. Bump MODULE_VERSION in driver-prototype/minisforum_n5_it5571.c, commit,
-#    tag and push. release.sh refuses to run if the tag and the source disagree.
-git tag -a v0.3.0 -m "v0.3.0: ..."
-git push origin v0.3.0
-
-# 2. Build the artifacts (they are written to dist/, which is gitignored).
-#    For a dry run before tagging: scripts/release.sh --ref HEAD
-scripts/release.sh
-
-# 3. Publish the artifacts (the one-liner fetches get.sh).
-gh release create v0.3.0 dist/minisforum-n5-it5571-0.3.0.tar.gz --title "v0.3.0"
-gh release upload v0.3.0 dist/minisforum-n5-it5571-0.3.0.tar.gz.sha256 dist/get.sh
-```
-
-The archive contains `driver-prototype/`, `scripts/` without `get.sh` and
-`release.sh`, plus `README.md`, `LICENSE`, `LICENSES/`, `.gitattributes` and
-`.gitignore`; `.gitattributes` decides that, and `release.sh` checks the result.
-Uncommitted changes never reach the archive, and `get.sh` refuses to install
-from an incomplete one.
-
-After publishing, check the real download path. This downloads the release,
-verifies the checksum and prints the help, changing nothing:
-
-```bash
-bash -c "$(curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/get.sh)" -- --help
-```
-
-`releases/latest` ignores drafts and pre-releases, so publish a normal release
-for the one-liner to pick it up.
-
-The checksum file is there for people who want to verify by hand:
-
-```bash
-cd dist && sha256sum -c minisforum-n5-it5571-0.3.0.tar.gz.sha256
-```
-
 ## Original documentation
 
-Every upstream document was moved into `unraid-legacy/` untouched, so the full
-context of the original project is still here:
+The original upstream documents live in `unraid-legacy/`, untouched:
 
 - [Original README (English)](unraid-legacy/README.md) and the
   [简体中文](unraid-legacy/README.zh-CN.md) version — features, channel map,

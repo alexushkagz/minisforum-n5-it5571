@@ -53,7 +53,8 @@ Modes:
   --uninstall
         Detects how the module is installed (insmod / persistent / DKMS)
         and undoes it: unloads, removes the .ko, depmod, deletes the
-        modprobe/load config files and the /usr/src DKMS tree.
+        modprobe/load config files and the /usr/src DKMS tree (kept if
+        the DKMS state cannot be read).
         Only the running kernel's .ko is removed; copies left for other
         kernels are listed.
 

@@ -5,15 +5,27 @@
 # Supported: Debian / Ubuntu (regular kernel), Proxmox VE (pve kernel),
 # Fedora / RHEL 8+ (dnf). Anything else is rejected by os_family().
 #
-# ensure_build_deps exact|dkms
-#   exact -- compiler + headers for the running kernel (--test/--persistent).
-#   dkms  -- the above, plus the distro's header metapackage (so DKMS can
-#            rebuild after kernel updates) and the dkms package itself.
-#   Only what is missing is installed, in a single transaction. Exactly those
-#   packages are recorded in INSTALLED_DEPS (dnf: DNF_UNDO=1).
-# ensure_dkms  -- shorthand for ensure_build_deps dkms.
-# cleanup_installed_deps -- removes exactly the recorded packages (never an
-#   autoremove); warns on failure, never aborts.
+# Functions you can call:
+#
+#   ensure_build_deps exact|dkms
+#       Installs whatever build dependencies are missing, in one package-manager
+#       transaction. Packages that are already installed are left alone.
+#         exact -- compiler + headers for the running kernel
+#                  (used by --test and --persistent).
+#         dkms  -- the above, plus the distro's header metapackage (so DKMS can
+#                  rebuild after kernel updates) and the dkms package itself.
+#   ensure_dkms
+#       Shorthand for "ensure_build_deps dkms".
+#   cleanup_installed_deps
+#       Removes the packages this script installed -- and only those. Packages
+#       that were already on the system are never touched, and no "autoremove"
+#       is run. If removal fails it prints a warning and carries on.
+#
+# What was installed is remembered in two variables, used by the cleanup:
+#   INSTALLED_DEPS  list of packages installed by ensure_build_deps
+#   DNF_UNDO        set to 1 after a successful dnf install (Fedora/RHEL); the
+#                   cleanup then undoes that dnf transaction instead of
+#                   removing packages one by one
 #
 # Test hooks (environment overrides, no system changes needed):
 #   OS_RELEASE_FILE  path to an os-release file     (default: /etc/os-release)
