@@ -36,21 +36,26 @@ Modes:
         Build the module and insmod it into the RUNNING kernel.
         Read-only sensors: no PWM writes. Nothing is persisted;
         a reboot returns you to BIOS control. First thing to try.
+        An already-loaded copy is unloaded first.
 
   --persistent
         Build and install into /lib/modules/<kernel>/extra, then register
         it with modprobe so it loads on every boot. Survives reboots, but
         the module is kernel-specific and must be re-run after kernel updates.
+        An already-loaded copy is unloaded first.
 
   --dkms
         Full DKMS install. The module is rebuilt automatically on every
         kernel update. Missing build dependencies, the header metapackage
         and dkms itself are installed automatically and kept.
+        An already-loaded copy is unloaded first.
 
   --uninstall
         Detects how the module is installed (insmod / persistent / DKMS)
         and undoes it: unloads, removes the .ko, depmod, deletes the
         modprobe/load config files and the /usr/src DKMS tree.
+        Only the running kernel's .ko is removed; copies left for other
+        kernels are listed.
 
   --help, -h
         Show this help.
@@ -129,6 +134,7 @@ cmd_test() {
   check_build_deps
   local ko
   ko="$(build_module)"
+  reload_prepare
   if [ "$ENABLE_WRITE" -eq 1 ]; then
     insmod "$ko" enable_write=1 \
       || die "insmod failed -- check dmesg (unsupported DMI? wrong kernel?)"
@@ -143,31 +149,49 @@ cmd_test() {
   echo "  rerun with --persistent or --dkms once the readings look right"
 }
 
+# Removes the installed .ko again; config files are left to the caller.
+rollback_persistent() {
+  rm -f "/lib/modules/${KVER}/extra/${MODULE}.ko"
+  depmod -a
+}
+
 cmd_persistent() {
   check_build_deps
   local ko
   ko="$(build_module)"
 
+  local installed="/lib/modules/${KVER}/extra/${MODULE}.ko"
   install -d "/lib/modules/${KVER}/extra"
-  install -m 0644 "$ko" "/lib/modules/${KVER}/extra/${MODULE}.ko"
+  install -m 0644 "$ko" "$installed"
   depmod -a
 
   # A leftover DKMS/distro copy of the module would be picked by modprobe
   # from a higher-priority directory and shadow the file we just installed.
   # Check that modprobe resolves to our .ko before loading anything.
-  local wanted actual
-  wanted="/lib/modules/${KVER}/extra/${MODULE}.ko"
-  actual="$(modinfo -n "$MODULE" 2>/dev/null || echo "$wanted")"
-  [ "$actual" = "$wanted" ] || die "modprobe ${MODULE} resolves to ${actual}, not the freshly built ${wanted} -- a DKMS/distro install shadows it (run: install.sh --uninstall, or use --dkms)"
+  local actual
+  actual="$(modinfo -n "$MODULE" 2>/dev/null)" || actual=""
+  if [ -z "$actual" ]; then
+    rollback_persistent
+    die "modinfo cannot find ${MODULE} after install -- check depmod/modules dir"
+  fi
+  if [ "$actual" != "$installed" ]; then
+    rollback_persistent
+    die "modprobe ${MODULE} resolves to ${actual}, not the freshly built ${installed} -- a DKMS/distro install shadows it (run: install.sh --uninstall, or use --dkms)"
+  fi
 
   if [ "$ENABLE_WRITE" -eq 1 ]; then
     echo "options ${MODULE} enable_write=1" > "$MODPROBE_CONF"
   else
     rm -f "$MODPROBE_CONF"
   fi
-  echo "$MODULE" > "$MODULES_LOAD_CONF"
 
-  modprobe "$MODULE" || die "load failed -- verify with: dmesg | grep ${MODULE}"
+  reload_prepare
+  if ! modprobe "$MODULE"; then
+    rollback_persistent
+    rm -f "$MODPROBE_CONF"
+    die "load failed -- verify with: dmesg | grep ${MODULE}"
+  fi
+  echo "$MODULE" > "$MODULES_LOAD_CONF"
 
   echo "installed persistently for kernel ${KVER}."
   echo "the module is kernel-specific; rerun this script after every kernel update."

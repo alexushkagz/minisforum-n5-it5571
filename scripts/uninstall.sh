@@ -8,6 +8,10 @@
 #
 # A module that is in use cannot be unloaded. The script says so and removes
 # the files anyway; unload it later with "modprobe -r minisforum_n5_it5571".
+#
+# If "dkms status" fails, the DKMS state is unknown: all /usr/src trees are
+# kept and the manual cleanup commands are printed. Copies of the module left
+# in other kernels' module directories are listed, never deleted.
 
 set -euo pipefail
 
@@ -21,8 +25,8 @@ need_root
 
 # A module in use stays loaded; warn and continue so the rest still runs.
 status_msg="module was not loaded"
-if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
-    if modprobe -r "$MODULE" 2>/dev/null || rmmod "$MODULE" 2>/dev/null; then
+if module_loaded; then
+    if unload_module; then
         status_msg="unloaded the running module"
     else
         warning "module is in use and stays loaded; removing files/registration anyway"
@@ -32,8 +36,14 @@ if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
 fi
 
 failed_versions=()
+dkms_unreadable=0
 if have dkms; then
-    versions="$(dkms_registered_versions)"
+    if ! versions="$(dkms_registered_versions)"; then
+        dkms_unreadable=1
+        versions=""
+        warning "could not read DKMS state (dkms status failed)"
+        status_msg="${status_msg}; DKMS state unreadable, source trees kept"
+    fi
 
     if [ -n "$versions" ]; then
         removed=0
@@ -58,6 +68,11 @@ fi
 echo "Removing DKMS source tree..."
 for tree in "/usr/src/${DRIVER_NAME}"*; do
     [ -e "$tree" ] || continue
+    if [ "$dkms_unreadable" -eq 1 ]; then
+        echo "  kept ${tree}: DKMS state could not be read" >&2
+        echo "  once dkms works run: dkms remove -m ${DRIVER_NAME} -v VERSION --all && rm -rf ${tree}" >&2
+        continue
+    fi
     kept=""
     for version in "${failed_versions[@]}"; do
         if [ "$tree" = "/usr/src/${DRIVER_NAME}-${version}" ]; then
@@ -78,6 +93,19 @@ rm -f "/lib/modules/${KVER}/extra/${MODULE}.ko"
 rm -f "$MODPROBE_CONF" "$MODULES_LOAD_CONF"
 depmod -a
 
+others=()
+for ko in /lib/modules/*/extra/${MODULE}.ko; do
+    [ -e "$ko" ] || continue
+    [ "$ko" = "/lib/modules/${KVER}/extra/${MODULE}.ko" ] && continue
+    others+=("$ko")
+done
+if [ "${#others[@]}" -gt 0 ]; then
+    echo "copies left for other kernels:"
+    printf '  %s\n' "${others[@]}"
+    echo "remove them with: rm -f ${others[*]}"
+    echo "then run: depmod -a"
+fi
+
 echo ""
 echo "uninstall complete for kernel ${KVER}: ${status_msg}"
 
@@ -89,7 +117,7 @@ if have dkms && dkms status 2>/dev/null | grep -q "^${DRIVER_NAME}[/,]"; then
 else
     echo "  (not registered in DKMS - OK)"
 fi
-if lsmod | awk '{print $1}' | grep -qx "$MODULE"; then
+if module_loaded; then
     echo "  ${MODULE} is still loaded (it was in use)"
 else
     echo "  (not loaded - OK)"

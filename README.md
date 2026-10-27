@@ -102,15 +102,19 @@ Modes:
   sensors unless `--enable-write`. Nothing persisted; a reboot returns to BIOS
   control. Missing build dependencies (toolchain + this kernel's headers)
   are installed, and exactly those packages are removed again when the script
-  finishes.
+  finishes. An already-loaded copy is unloaded first.
 - `--persistent` — install into `/lib/modules/<kernel>/extra` and load on boot
   via modprobe. Kernel-specific: **rerun it after every kernel update** (or
   prefer `--dkms` so this happens automatically). Missing build dependencies
   are installed and exactly those packages are removed again afterwards.
+  An already-loaded copy is unloaded first, so rerunning with `--enable-write`
+  reloads the module with the new setting.
 - `--dkms` — register with DKMS. The module is rebuilt automatically whenever
   a kernel update brings new headers. Build dependencies (incl. the header
-  meta-package) and dkms are installed once and **kept**.
-- `--uninstall` — detect what is installed and undo it.
+  meta-package) and dkms are installed once and **kept**. A loaded copy is
+  unloaded first.
+- `--uninstall` — detect what is installed and undo it. Only the running
+  kernel's `.ko` is removed; copies left for other kernels are listed.
 - `--help`, `-h` — show usage.
 
 `--enable-write` applies to `--test`, `--persistent` and `--dkms` (ignored by
@@ -119,7 +123,9 @@ Modes:
 The helper scripts can also be run directly. `setup-dkms.sh` performs a DKMS
 install. `uninstall.sh` is the full uninstaller: it takes no arguments and
 undoes `--dkms`, `--persistent` and `--test` installs alike, removing every
-registered DKMS version. It is what `install.sh --uninstall` calls.
+registered DKMS version. It is what `install.sh --uninstall` calls. If
+`dkms status` fails, it keeps the `/usr/src` trees and prints the manual
+cleanup commands.
 
 ```bash
 sudo ./scripts/setup-dkms.sh --enable-write

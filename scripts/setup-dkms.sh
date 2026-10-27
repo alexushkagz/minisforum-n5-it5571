@@ -61,7 +61,8 @@ AUTOINSTALL="yes"
 EOF
 
 echo "Registering with DKMS..."
-if dkms_registered_versions | grep -qxF "${DRIVER_VERSION}"; then
+registered="$(dkms_registered_versions)" || die "dkms status failed; fix dkms and rerun"
+if grep -qxF "${DRIVER_VERSION}" <<< "$registered"; then
     dkms remove -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}" --all \
         || die "could not remove the existing DKMS registration of ${DRIVER_NAME} ${DRIVER_VERSION} (unload the module and retry)"
 fi
@@ -75,13 +76,15 @@ dkms install -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
 
 if [ "$ENABLE_WRITE" -eq 1 ]; then
     echo "Loading module with enable_write=1 (PWM enabled)..."
-    modprobe "$MODULE" enable_write=1
     echo "options ${MODULE} enable_write=1" > "$MODPROBE_CONF"
 else
     echo "Loading module (read-only sensors, no PWM writes)..."
-    modprobe "$MODULE"
     rm -f "$MODPROBE_CONF"
 fi
+
+reload_prepare
+modprobe "$MODULE" \
+    || die "load failed -- verify with: dmesg | grep ${MODULE}; the DKMS install itself succeeded and stays registered"
 
 echo "$MODULE" > "$MODULES_LOAD_CONF"
 
