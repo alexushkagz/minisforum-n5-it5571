@@ -3,14 +3,16 @@
 # Release helper for the Minisforum N5 (IT5571) driver.
 #
 # Builds the source archive, its checksum, and a get.sh with the version and
-# checksum filled in. Uses the matching vX.Y.Z tag unless --ref says otherwise.
+# checksum filled in. Everything is read from the tagged commit, never from the
+# working tree, so uncommitted changes are ignored.
 #
 # It never pushes tags or uploads anything -- publishing stays manual.
 #
 # Usage:
-#   scripts/release.sh [TAG]
-#     TAG   tag to release (default: read from the driver source)
-#     --ref HEAD   archive this ref instead of the tag (smoke test only)
+#   scripts/release.sh [TAG] [--ref REF]
+#     TAG   tag to release (default: v<MODULE_VERSION at HEAD>)
+#     --ref REF   build from this ref instead of the tag; the tag must still
+#                 match the version in REF (e.g. --ref HEAD for a smoke test)
 
 set -euo pipefail
 
@@ -32,36 +34,65 @@ while [ $# -gt 0 ]; do
 done
 
 DRIVER_SRC="driver-prototype/minisforum_n5_it5571.c"
-VERSION="$(driver_version "$DRIVER_SRC")"
 
-# Without an explicit tag, release the version the driver source declares.
-[ -n "$TAG" ] || TAG="v${VERSION}"
+if [ -z "$TAG" ]; then
+  head_src="$(git show "HEAD:${DRIVER_SRC}")" || die "cannot read ${DRIVER_SRC} at HEAD"
+  TAG="v$(printf '%s\n' "$head_src" | driver_version /dev/stdin)"
+fi
+REF="${REF:-$TAG}"
 
-if [ "$TAG" != "v${VERSION}" ]; then
-  die "tag ${TAG} does not match MODULE_VERSION ${VERSION} in ${DRIVER_SRC} -- fix one of them before releasing"
+if ! git rev-parse --verify "${REF}^{commit}" >/dev/null 2>&1; then
+  if [ "$REF" = "$TAG" ]; then
+    die "tag ${TAG} not found -- create it first: git tag -a ${TAG} -m \"${TAG}: ...\""
+  fi
+  die "git ref '${REF}' not found"
 fi
 
-REF="${REF:-$TAG}"
+TMP_SRC="$(mktemp "${TMPDIR:-/tmp}/n5-driver-src.XXXXXX")"
+trap 'rm -f "$TMP_SRC"' EXIT
+git show "${REF}:${DRIVER_SRC}" > "$TMP_SRC" \
+  || die "cannot read ${DRIVER_SRC} at ${REF}"
+VERSION="$(driver_version "$TMP_SRC")"
+
+if [ "$TAG" != "v${VERSION}" ]; then
+  die "tag ${TAG} does not match MODULE_VERSION ${VERSION} in ${DRIVER_SRC} at ${REF} -- fix one of them before releasing"
+fi
+
 DIST_DIR="${REPO_ROOT}/dist"
 TARBALL="minisforum-n5-it5571-${VERSION}.tar.gz"
 PREFIX="minisforum-n5-it5571-${VERSION}/"
-
-git rev-parse --verify "${REF}^{commit}" >/dev/null \
-  || die "git ref '${REF}' not found"
 
 mkdir -p "$DIST_DIR"
 
 echo "archiving ${REF} -> ${DIST_DIR}/${TARBALL}"
 git archive --format=tar.gz --prefix="$PREFIX" -o "${DIST_DIR}/${TARBALL}" "$REF"
 
+# The archive must match what get.sh and the installer expect; .gitattributes
+# controls it.
+LISTING="$(tar -tzf "${DIST_DIR}/${TARBALL}")"
+for want in driver-prototype/minisforum_n5_it5571.c driver-prototype/Makefile \
+            scripts/install.sh scripts/setup-dkms.sh scripts/uninstall.sh \
+            scripts/lib/common.sh scripts/lib/kernel-deps.sh; do
+  printf '%s\n' "$LISTING" | grep -qxF "${PREFIX}${want}" \
+    || die "archive is missing ${want} -- check .gitattributes"
+done
+for banned in scripts/get.sh scripts/release.sh; do
+  if printf '%s\n' "$LISTING" | grep -qxF "${PREFIX}${banned}"; then
+    die "archive must not contain ${banned} -- check .gitattributes"
+  fi
+done
+if bad="$(printf '%s\n' "$LISTING" | awk -v p="$PREFIX" '{s=p "unraid-legacy"; if (index($0,s)==1 && (length($0)==length(s) || substr($0,length(s)+1,1)=="/")) {print; exit}}')" && [ -n "$bad" ]; then
+  die "archive must not contain ${bad} -- check .gitattributes"
+fi
+
 SHA="$(sha256sum "${DIST_DIR}/${TARBALL}" | cut -d' ' -f1)"
 printf '%s  %s\n' "$SHA" "$TARBALL" > "${DIST_DIR}/${TARBALL}.sha256"
 
 # get.sh is published with the real values substituted, so users never run a
 # version that skips verification.
-sed -e "s|^VERSION=\".*<REPLACE.*|VERSION=\"${VERSION}\"|" \
+git show "${REF}:scripts/get.sh" | sed -e "s|^VERSION=\".*<REPLACE.*|VERSION=\"${VERSION}\"|" \
     -e "s|^SHA256=\".*<REPLACE.*|SHA256=\"${SHA}\"|" \
-    "$REPO_ROOT/scripts/get.sh" > "${DIST_DIR}/get.sh"
+    > "${DIST_DIR}/get.sh"
 chmod +x "${DIST_DIR}/get.sh"
 
 # Reject a silent substitution failure. Only the CONFIG assignments are

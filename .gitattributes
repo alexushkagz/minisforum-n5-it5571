@@ -4,7 +4,7 @@
 # template whose published copy is generated at release time.
 
 # Unraid-only reference: docs, screenshots, the original WebGUI.
-/unraid-legacy/**  export-ignore
+unraid-legacy  export-ignore
 
 # Source template; releases publish a generated copy with real values.
 /scripts/get.sh     export-ignore

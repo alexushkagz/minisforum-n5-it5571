@@ -38,14 +38,16 @@ Proxmox parts their own place:
   kernel module `Makefile` (see its [README](driver-prototype/README.md) for
   manual build and load). The path mirrors the upstream repo exactly, so the
   driver can be merged forward cleanly as the original project evolves.
-- **`scripts/`** — `install.sh` builds and installs the driver from the sources
-  next to it, so it runs either from a clone or from inside an unpacked
-  release. `get.sh` is the download entrypoint: it fetches a release, verifies
-  its checksum and hands over to `install.sh`. `setup-dkms.sh` and
-  `uninstall.sh` are the DKMS installer and the standalone uninstaller, both
-  runnable directly. `lib/common.sh` holds the shared helpers and constants,
-  `lib/kernel-deps.sh` the distro/kernel-header logic, and `release.sh` builds the release artifacts (see
-  [Releasing](#releasing)).
+- **`scripts/`** — the installer and its helpers:
+  - `install.sh` builds and installs the driver from the sources next to it, so
+    it runs either from a clone or from inside an unpacked release.
+  - `get.sh` is the download entrypoint: it fetches a release, verifies its
+    checksum and hands over to `install.sh`.
+  - `setup-dkms.sh` and `uninstall.sh` are the DKMS installer and the
+    standalone uninstaller, both runnable directly.
+  - `lib/common.sh` holds the shared helpers and constants; `lib/kernel-deps.sh`
+    the distro/kernel-header logic.
+  - `release.sh` builds the release artifacts (see [Releasing](#releasing)).
 - **`unraid-legacy/`** — everything Unraid-only from the original repository,
   moved here unchanged for reference: the plugin file, the WebGUI sources, the
   `.txz` and kernel build scripts, the reverse-engineering tools, the
@@ -172,10 +174,12 @@ can do the fan-speed curves for you.
 ## Releasing
 
 The version is written down in exactly one place — the `MODULE_VERSION` string
-in `driver-prototype/minisforum_n5_it5571.c`. `install.sh`, `setup-dkms.sh` and
-`release.sh` all read it from there, so nothing can drift out of step.
+in `driver-prototype/minisforum_n5_it5571.c`. `setup-dkms.sh` and `release.sh`
+read it from there, so nothing can drift out of step.
 
-`scripts/release.sh` builds the three artifacts a GitHub release needs:
+`scripts/release.sh` builds the three artifacts a GitHub release needs. It reads
+everything (driver version, archive, `get.sh` template) from the tagged commit,
+not from the working tree, so commit and tag first:
 
 ```
 dist/minisforum-n5-it5571-<version>.tar.gz        the source archive
@@ -191,6 +195,7 @@ git tag -a v0.3.0 -m "v0.3.0: ..."
 git push origin v0.3.0
 
 # 2. Build the artifacts (they are written to dist/, which is gitignored).
+#    For a dry run before tagging: scripts/release.sh --ref HEAD
 scripts/release.sh
 
 # 3. Publish the artifacts (the one-liner fetches get.sh).
@@ -198,10 +203,21 @@ gh release create v0.3.0 dist/minisforum-n5-it5571-0.3.0.tar.gz --title "v0.3.0"
 gh release upload v0.3.0 dist/minisforum-n5-it5571-0.3.0.tar.gz.sha256 dist/get.sh
 ```
 
-The archive ships only what the installer needs at runtime; `.gitattributes`
-decides that. Everything must be committed before tagging, because `git archive`
-reads committed files only, and `get.sh` refuses to install from an incomplete
-archive.
+The archive contains `driver-prototype/`, `scripts/` without `get.sh` and
+`release.sh`, plus `README.md`, `LICENSE`, `LICENSES/`, `.gitattributes` and
+`.gitignore`; `.gitattributes` decides that, and `release.sh` checks the result.
+Uncommitted changes never reach the archive, and `get.sh` refuses to install
+from an incomplete one.
+
+After publishing, check the real download path. This downloads the release,
+verifies the checksum and prints the help, changing nothing:
+
+```bash
+bash -c "$(curl -fsSL https://github.com/alexushkagz/minisforum-n5-it5571/releases/latest/download/get.sh)" -- --help
+```
+
+`releases/latest` ignores drafts and pre-releases, so publish a normal release
+for the one-liner to pick it up.
 
 The checksum file is there for people who want to verify by hand:
 
