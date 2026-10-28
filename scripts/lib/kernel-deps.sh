@@ -159,6 +159,7 @@ ensure_build_deps() {
   esac
 
   set_distro
+  banner "Build dependencies"
 
   local missing=()
   for p in $BUILD_PKGS; do
@@ -194,19 +195,20 @@ ensure_build_deps() {
 
   if [ "${#missing[@]}" -gt 0 ]; then
     install_packages "${missing[@]}"
+  else
+    ok "already installed"
   fi
 
   headers_present \
     || die "kernel headers for the running kernel (${UNAME_R}) are not available (${MODULES_DIR}/${UNAME_R}/build is missing). If a newer kernel was installed but not booted yet, reboot into the newest kernel, or install headers for the running kernel manually"
 
   if [ "$mode" = dkms ] && [ "${#INSTALLED_DEPS[@]}" -gt 0 ]; then
-    echo "kept for future DKMS rebuilds: ${INSTALLED_DEPS[*]}" >&2
+    ok "kept for future DKMS rebuilds"
   fi
 }
 
 install_packages() {
   local missing=("$@")
-  echo "installing build dependencies via ${PKG_MGR}: ${missing[*]}" >&2
 
   case "$PKG_MGR" in
     apt-get)
@@ -240,24 +242,28 @@ install_packages() {
       DNF_UNDO=1
       ;;
   esac
+  ok "build dependencies installed"
 }
 
 cleanup_installed_deps() {
   [ "${#INSTALLED_DEPS[@]}" -eq 0 ] && return 0
+  banner "Removing build dependencies"
 
   case "${PKG_MGR:-}" in
     apt-get)
-      echo "removing installed build dependencies: ${INSTALLED_DEPS[*]}" >&2
-      apt-get remove --purge -y "${INSTALLED_DEPS[@]}" \
-        || warning "failed to remove build dependencies; remove manually: apt-get remove --purge ${INSTALLED_DEPS[*]}"
+      if apt-get remove --purge -y "${INSTALLED_DEPS[@]}"; then
+        summary_add OK "removed the ${#INSTALLED_DEPS[@]} build packages installed by this run"
+      else
+        warning "failed to remove build dependencies; remove manually: apt-get remove --purge ${INSTALLED_DEPS[*]}"
+      fi
       ;;
     dnf)
-      echo "removing installed build dependencies: ${INSTALLED_DEPS[*]}" >&2
       if [ "$DNF_UNDO" -eq 1 ] && dnf history undo last -y; then
-        :
+        summary_add OK "undid the dnf transaction that installed the build dependencies"
+      elif dnf remove -y "${INSTALLED_DEPS[@]}"; then
+        summary_add OK "removed the build dependencies installed by this run"
       else
-        dnf remove -y "${INSTALLED_DEPS[@]}" \
-          || warning "failed to remove build dependencies; remove manually: dnf remove ${INSTALLED_DEPS[*]}"
+        warning "failed to remove build dependencies; remove manually: dnf remove ${INSTALLED_DEPS[*]}"
       fi
       ;;
     *)

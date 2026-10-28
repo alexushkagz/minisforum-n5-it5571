@@ -24,6 +24,7 @@ KVER="$(uname -r)"
 need_root
 
 # A module in use stays loaded; warn and continue so the rest still runs.
+banner "Unloading and DKMS"
 status_msg="module was not loaded"
 if module_loaded; then
     if unload_module; then
@@ -65,7 +66,7 @@ fi
 
 # Keep the source tree of any version whose dkms remove failed: its
 # registration still references that tree.
-echo "Removing DKMS source tree..."
+banner "DKMS source trees"
 for tree in "/usr/src/${DRIVER_NAME}"*; do
     [ -e "$tree" ] || continue
     if [ "$dkms_unreadable" -eq 1 ]; then
@@ -88,7 +89,7 @@ for tree in "/usr/src/${DRIVER_NAME}"*; do
     rm -rf "$tree"
 done
 
-echo "Removing module files and config..."
+banner "Module files and config"
 rm -f "/lib/modules/${KVER}/extra/${MODULE}.ko"
 rm -f "$MODPROBE_CONF" "$MODULES_LOAD_CONF"
 depmod -a
@@ -106,29 +107,25 @@ if [ "${#others[@]}" -gt 0 ]; then
     echo "then run: depmod -a"
 fi
 
-echo ""
-echo "uninstall complete for kernel ${KVER}: ${status_msg}"
-
-echo ""
-echo "Verify removal:"
+summary_add OK "uninstalled for kernel ${KVER}: ${status_msg}"
 if have dkms && dkms status 2>/dev/null | grep -q "^${DRIVER_NAME}[/,]"; then
-    echo "  still registered in DKMS:"
-    dkms status | grep "^${DRIVER_NAME}[/,]" | sed 's/^/    /'
+    summary_add WARN "still registered in DKMS (see: dkms status)"
 else
-    echo "  (not registered in DKMS - OK)"
+    summary_add OK "not registered in DKMS"
 fi
 if module_loaded; then
-    echo "  ${MODULE} is still loaded (it was in use)"
+    summary_add WARN "${MODULE} is still loaded (it was in use)"
 else
-    echo "  (not loaded - OK)"
+    summary_add OK "not loaded"
 fi
 
-echo ""
-echo "note: dkms and build tools installed by --dkms (or by you) are not touched."
+summary_add NEXT "dkms and build tools installed by --dkms (or by you) were not touched"
 if have dkms && [ -z "$(dkms status 2>/dev/null)" ]; then
     if have apt-get; then
-        echo "dkms is not used by any module; remove it with: apt-get remove --purge dkms"
+        summary_add NEXT "dkms is not used by any module; remove it with: apt-get remove --purge dkms"
     elif have dnf; then
-        echo "dkms is not used by any module; remove it with: dnf remove dkms"
+        summary_add NEXT "dkms is not used by any module; remove it with: dnf remove dkms"
     fi
 fi
+summary_print
+

@@ -31,9 +31,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DRIVER_SRC="${REPO_ROOT}/driver-prototype"
 
 if [ ! -f "${DRIVER_SRC}/minisforum_n5_it5571.c" ] || [ ! -f "${DRIVER_SRC}/Makefile" ]; then
-    echo "error: driver source not found at ${DRIVER_SRC}" >&2
-    echo "this script must be run from inside the repository (scripts/setup-dkms.sh)" >&2
-    exit 1
+    die "driver source not found at ${DRIVER_SRC} -- this script must be run from inside the repository (scripts/setup-dkms.sh)"
 fi
 
 DRIVER_VERSION="$(driver_version "${DRIVER_SRC}/${MODULE}.c")"
@@ -42,16 +40,11 @@ DKMS_DIR="/usr/src/${DRIVER_NAME}-${DRIVER_VERSION}"
 
 need_root
 
-echo "Ensuring build dependencies and dkms..."
 ensure_dkms
 
-echo "Creating DKMS tree at ${DKMS_DIR}..."
+banner "DKMS registration"
 mkdir -p "${DKMS_DIR}"
-
-echo "Copying driver source from ${DRIVER_SRC}..."
 cp "${DRIVER_SRC}/${MODULE}.c" "${DRIVER_SRC}/Makefile" "${DKMS_DIR}/"
-
-echo "Writing dkms.conf..."
 cat > "${DKMS_DIR}/dkms.conf" <<EOF
 PACKAGE_NAME="${DRIVER_NAME}"
 PACKAGE_VERSION="${DRIVER_VERSION}"
@@ -60,7 +53,6 @@ DEST_MODULE_LOCATION[0]="/extra"
 AUTOINSTALL="yes"
 EOF
 
-echo "Registering with DKMS..."
 registered="$(dkms_registered_versions)" || die "dkms status failed; fix dkms and rerun"
 if grep -qxF "${DRIVER_VERSION}" <<< "$registered"; then
     dkms remove -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}" --all \
@@ -68,18 +60,17 @@ if grep -qxF "${DRIVER_VERSION}" <<< "$registered"; then
 fi
 dkms add -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
 
-echo "Building module for kernel $(uname -r)..."
+banner "Building and installing for kernel $(uname -r)"
 dkms build -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
-
-echo "Installing module..."
 dkms install -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}"
 
+banner "Loading the module"
 if [ "$ENABLE_WRITE" -eq 1 ]; then
-    echo "Loading module with enable_write=1 (PWM enabled)..."
     echo "options ${MODULE} enable_write=1" > "$MODPROBE_CONF"
+    load_result="loaded with PWM writes ENABLED (enable_write=1)"
 else
-    echo "Loading module (read-only sensors, no PWM writes)..."
     rm -f "$MODPROBE_CONF"
+    load_result="loaded (read-only sensors, no PWM writes)"
 fi
 
 reload_prepare
@@ -88,14 +79,8 @@ modprobe "$MODULE" \
 
 echo "$MODULE" > "$MODULES_LOAD_CONF"
 
-echo ""
-echo "Done. DKMS status:"
-dkms status
+summary_add OK "DKMS: ${DRIVER_NAME} ${DRIVER_VERSION}, rebuilt automatically on every kernel update"
+summary_add OK "${load_result}"
+summary_add NEXT "check temperatures and RPM: sensors"
+summary_print
 
-echo ""
-echo "Module loaded:"
-lsmod | grep "$MODULE" || true
-
-echo ""
-echo "To verify sensors work:"
-echo "  sensors"

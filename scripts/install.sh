@@ -121,6 +121,7 @@ setup_build_tree() {
 }
 
 build_module() {
+  banner "Building the module"
   make -C "/lib/modules/${KVER}/build" M="$TMP_DIR/driver-prototype" modules >/dev/null \
     || die "kernel module build failed (see error above)"
   [ -f "$TMP_DIR/driver-prototype/${MODULE}.ko" ] || die "build produced no .ko file"
@@ -135,19 +136,20 @@ cmd_test() {
   check_build_deps
   local ko
   ko="$(build_module)"
+  banner "Loading the module"
   reload_prepare
   if [ "$ENABLE_WRITE" -eq 1 ]; then
     insmod "$ko" enable_write=1 \
       || die "insmod failed -- check dmesg (unsupported DMI? wrong kernel?)"
-    echo "module loaded for testing (enable_write=1, PWM control enabled)."
+    summary_add OK "loaded for testing with PWM writes ENABLED (enable_write=1)"
   else
     insmod "$ko" || die "insmod failed -- check dmesg (unsupported DMI? wrong kernel?)"
-    echo "module loaded for testing (read-only sensors, no PWM writes)."
+    summary_add OK "loaded for testing (read-only sensors, no PWM writes)"
   fi
 
-  echo "  sensors                    -> check temperatures/RPM"
-  echo "  rmmod ${MODULE}            -> unload, return to BIOS control"
-  echo "  rerun with --persistent or --dkms once the readings look right"
+  summary_add NEXT "check temperatures and RPM: sensors"
+  summary_add NEXT "unload and return to BIOS control: rmmod ${MODULE}"
+  summary_add NEXT "keep it: rerun with --persistent or --dkms once the readings look right"
 }
 
 # Removes the installed .ko again; config files are left to the caller.
@@ -162,6 +164,7 @@ cmd_persistent() {
   ko="$(build_module)"
 
   local installed="/lib/modules/${KVER}/extra/${MODULE}.ko"
+  banner "Installing for kernel ${KVER}"
   install -d "/lib/modules/${KVER}/extra"
   install -m 0644 "$ko" "$installed"
   depmod -a
@@ -186,6 +189,7 @@ cmd_persistent() {
     rm -f "$MODPROBE_CONF"
   fi
 
+  banner "Loading the module"
   reload_prepare
   if ! modprobe "$MODULE"; then
     rollback_persistent
@@ -194,8 +198,12 @@ cmd_persistent() {
   fi
   echo "$MODULE" > "$MODULES_LOAD_CONF"
 
-  echo "installed persistently for kernel ${KVER}."
-  echo "the module is kernel-specific; rerun this script after every kernel update."
+  if [ "$ENABLE_WRITE" -eq 1 ]; then
+    summary_add OK "installed for kernel ${KVER}, loads on boot, PWM writes ENABLED"
+  else
+    summary_add OK "installed for kernel ${KVER}, loads on boot (read-only sensors)"
+  fi
+  summary_add NEXT "the module is kernel-specific: rerun this script after every kernel update, or use --dkms"
 }
 
 cmd_dkms() {
@@ -243,6 +251,7 @@ main() {
       echo "removing temporary directory ${TMP_DIR}" >&2
       rm -rf "$TMP_DIR"
     fi
+    summary_print
     return 0
   }
   trap on_exit EXIT

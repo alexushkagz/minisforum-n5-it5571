@@ -7,10 +7,51 @@ MODULE="minisforum_n5_it5571"
 MODPROBE_CONF="/etc/modprobe.d/minisforum-n5.conf"
 MODULES_LOAD_CONF="/etc/modules-load.d/minisforum-n5.conf"
 
-die()     { echo "error: $*" >&2; exit 1; }
+# Colour only on a terminal, and never when NO_COLOR is set.
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_CYAN=$'\033[36m'
+  C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'
+else
+  C_RESET=""; C_BOLD=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""
+fi
+RULE="========================================================"
+
+# status_line LABEL COLOUR MESSAGE
+status_line() { printf '%s%-5s%s  %s\n' "$2" "$1" "$C_RESET" "$3" >&2; }
+ok()        { status_line OK    "$C_GREEN"  "$*"; }
+warning()   { status_line WARN  "$C_YELLOW" "$*"; }
+die()       { status_line ERROR "$C_RED"    "$*"; exit 1; }
+
 have()    { command -v "$1" >/dev/null 2>&1; }
-warning() { echo "warning: $*" >&2; }
 need_root() { [ "$(id -u)" -eq 0 ] || die "run as root (sudo $0 ...)"; }
+
+banner() {
+  printf '\n%s%s%s\n %s%s%s\n%s%s%s\n' \
+    "$C_CYAN" "$RULE" "$C_RESET" "$C_BOLD" "$1" "$C_RESET" "$C_CYAN" "$RULE" "$C_RESET" >&2
+}
+
+# Results queued during a run and printed once, last, by summary_print.
+# Levels: OK, WARN, NEXT (a hint, printed without a label).
+SUMMARY=()
+summary_add() { SUMMARY+=("$1|$2"); }
+
+summary_print() {
+  [ "${#SUMMARY[@]}" -gt 0 ] || return 0
+  banner "Summary"
+  local entry level text next_shown=0
+  for entry in "${SUMMARY[@]}"; do
+    level="${entry%%|*}"
+    text="${entry#*|}"
+    case "$level" in
+      OK)   ok "$text" ;;
+      WARN) warning "$text" ;;
+      NEXT)
+        if [ "$next_shown" -eq 0 ]; then echo "" >&2; next_shown=1; fi
+        echo "  $text" >&2
+        ;;
+    esac
+  done
+}
 
 # driver_version FILE  -- prints the version declared by the MODULE_VERSION
 #   string in the driver source.

@@ -24,7 +24,22 @@ MODULE="minisforum_n5_it5571"
 
 set -euo pipefail
 
-die() { echo "error: $*" >&2; exit 1; }
+# Same look as lib/common.sh. Copied rather than sourced because this file
+# runs before any archive exists, so there is nothing local to source yet.
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_CYAN=$'\033[36m'
+  C_GREEN=$'\033[32m'; C_RED=$'\033[31m'
+else
+  C_RESET=""; C_BOLD=""; C_CYAN=""; C_GREEN=""; C_RED=""
+fi
+RULE="========================================================"
+status_line() { printf '%s%-5s%s  %s\n' "$2" "$1" "$C_RESET" "$3" >&2; }
+ok()     { status_line OK    "$C_GREEN" "$*"; }
+die()    { status_line ERROR "$C_RED"   "$*"; exit 1; }
+banner() {
+  printf '\n%s%s%s\n %s%s%s\n%s%s%s\n' \
+    "$C_CYAN" "$RULE" "$C_RESET" "$C_BOLD" "$1" "$C_RESET" "$C_CYAN" "$RULE" "$C_RESET" >&2
+}
 
 # Intentionally self-contained: it runs as root before any archive exists, so
 # there is nothing local to source. The empty case is listed separately because
@@ -50,15 +65,17 @@ WORK="$(mktemp -d)"
 # leaving the temp dir behind. Call install.sh normally and pass on its status.
 trap 'rm -rf "$WORK"' EXIT
 
-echo "downloading ${URL}" >&2
+banner "Download and verify"
+echo "from ${URL}" >&2
 curl -fsSL "$URL" -o "${WORK}/${TARBALL}" \
   || die "download failed -- is the network up, and has release v${VERSION} been published?"
+ok "downloaded ${TARBALL}"
 
 if ! printf '%s  %s\n' "$SHA256" "${WORK}/${TARBALL}" | sha256sum --check - >/dev/null 2>&1; then
   actual="$(sha256sum "${WORK}/${TARBALL}" | cut -d' ' -f1)"
   die "checksum mismatch -- expected ${SHA256}, got ${actual}; re-run, or re-download if this keeps happening"
 fi
-echo "checksum OK" >&2
+ok "checksum OK"
 
 tar -xzf "${WORK}/${TARBALL}" -C "$WORK"
 
